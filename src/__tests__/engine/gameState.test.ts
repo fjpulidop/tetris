@@ -4,10 +4,20 @@ import { GameAction } from '../../engine/types.js'
 import { setCell, BOARD_COLS, BOARD_ROWS } from '../../engine/board.js'
 import { getCells } from '../../engine/rotation.js'
 
+/**
+ * Helper: create a state that is already in the 'playing' phase.
+ * Used in all gameplay tests so that the intro guard does not interfere.
+ */
+function playingState() {
+  const s = createGameState()
+  const { state } = updateGameState(s, [GameAction.Start], 0)
+  return state
+}
+
 describe('createGameState', () => {
-  it('returns phase "playing"', () => {
+  it('returns phase "intro"', () => {
     const state = createGameState()
-    expect(state.phase).toBe('playing')
+    expect(state.phase).toBe('intro')
   })
 
   it('returns a non-null activePiece', () => {
@@ -39,20 +49,20 @@ describe('createGameState', () => {
 
 describe('updateGameState — Pause', () => {
   it('toggles phase from playing to paused', () => {
-    const state = createGameState()
+    const state = playingState()
     const { state: paused } = updateGameState(state, [GameAction.Pause], 16)
     expect(paused.phase).toBe('paused')
   })
 
   it('toggles phase from paused back to playing', () => {
-    const state = createGameState()
+    const state = playingState()
     const { state: paused } = updateGameState(state, [GameAction.Pause], 16)
     const { state: resumed } = updateGameState(paused, [GameAction.Pause], 16)
     expect(resumed.phase).toBe('playing')
   })
 
   it('no other actions are processed while paused', () => {
-    const state = createGameState()
+    const state = playingState()
     const { state: paused } = updateGameState(state, [GameAction.Pause], 16)
     const originalPiece = paused.activePiece
     const { state: stillPaused } = updateGameState(paused, [GameAction.MoveLeft], 16)
@@ -63,7 +73,7 @@ describe('updateGameState — Pause', () => {
 
 describe('updateGameState — game-over state', () => {
   it('no actions are processed in gameover phase', () => {
-    const state = createGameState()
+    const state = playingState()
     const gameOverState = { ...state, phase: 'gameover' as const }
     const { state: after, events } = updateGameState(gameOverState, [GameAction.MoveLeft], 16)
     expect(after.phase).toBe('gameover')
@@ -73,7 +83,7 @@ describe('updateGameState — game-over state', () => {
 
 describe('updateGameState — movement', () => {
   it('MoveLeft decreases active piece col', () => {
-    const state = createGameState()
+    const state = playingState()
     const originalCol = state.activePiece!.col
     const { state: moved } = updateGameState(state, [GameAction.MoveLeft], 16)
     if (moved.activePiece) {
@@ -83,7 +93,7 @@ describe('updateGameState — movement', () => {
   })
 
   it('MoveRight increases active piece col', () => {
-    const state = createGameState()
+    const state = playingState()
     const originalCol = state.activePiece!.col
     const { state: moved } = updateGameState(state, [GameAction.MoveRight], 16)
     if (moved.activePiece) {
@@ -94,7 +104,7 @@ describe('updateGameState — movement', () => {
 
 describe('updateGameState — HardDrop', () => {
   it('HardDrop immediately locks the piece', () => {
-    const state = createGameState()
+    const state = playingState()
     const { events } = updateGameState(state, [GameAction.HardDrop], 16)
     // After hard drop, piece should be locked (new piece spawned or game-over)
     // Check that piece-lock event was emitted
@@ -103,7 +113,7 @@ describe('updateGameState — HardDrop', () => {
   })
 
   it('HardDrop spawns a new piece in the same tick', () => {
-    const state = createGameState()
+    const state = playingState()
     const { state: after } = updateGameState(state, [GameAction.HardDrop], 16)
     // A new piece should be spawned (could be same type by chance, but phase is still playing
     // unless board is full)
@@ -113,7 +123,7 @@ describe('updateGameState — HardDrop', () => {
   })
 
   it('HardDrop drops piece to the lowest valid row', () => {
-    const state = createGameState()
+    const state = playingState()
     const piece = state.activePiece!
     const board = state.board
 
@@ -150,7 +160,7 @@ describe('updateGameState — line clear', () => {
     // I-piece rotation 1 (East/vertical): offsets [[0,2],[1,2],[2,2],[3,2]]
     // At piece.col=2: cells land in column 4 (2+2=4).
     // Fill rows 16-19 with all cols except col 4 → I-piece fills col 4 → 4 line clears.
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     for (let row = 16; row < 20; row++) {
       for (let col = 0; col < BOARD_COLS; col++) {
@@ -173,7 +183,7 @@ describe('updateGameState — line clear', () => {
     // I-piece rotation 1 (East/vertical): offsets [[0,2],[1,2],[2,2],[3,2]]
     // At piece.col=2: cells land in column 4 (2+2=4).
     // Fill rows 16-19 with cols 0-3 and 5-9 filled (col 4 empty).
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     for (let row = 16; row < 20; row++) {
       for (let col = 0; col < BOARD_COLS; col++) {
@@ -191,7 +201,7 @@ describe('updateGameState — line clear', () => {
   it('level increases after clearing enough lines (10 lines = level 2)', () => {
     // Start with 9 lines cleared and level 1.
     // Clear 1 more line → 10 lines total → level 2.
-    let state = createGameState()
+    let state = playingState()
     state = { ...state, lines: 9, level: 1 }
 
     // Fill row 19 with cols 0-8 filled, col 9 empty.
@@ -221,7 +231,7 @@ describe('updateGameState — line clear', () => {
 
 describe('updateGameState — game-over detection', () => {
   it('game-over is triggered when spawn position is occupied', () => {
-    let state = createGameState()
+    let state = playingState()
 
     // We need: after the active piece hard-drops and locks, the NEXT piece's
     // spawn position must be occupied on the board (causing game-over).
@@ -261,7 +271,7 @@ describe('updateGameState — game-over detection', () => {
 
 describe('updateGameState — pure function', () => {
   it('calling with identical inputs twice returns identical state', () => {
-    const state = createGameState()
+    const state = playingState()
     const actions: GameAction[] = [GameAction.MoveLeft]
     const dt = 16
 
@@ -277,14 +287,14 @@ describe('updateGameState — pure function', () => {
   })
 
   it('does not mutate the input state board', () => {
-    const state = createGameState()
+    const state = playingState()
     const originalBoard = state.board.slice()
     updateGameState(state, [GameAction.HardDrop], 16)
     expect(state.board).toEqual(originalBoard)
   })
 
   it('does not mutate the input actions array', () => {
-    const state = createGameState()
+    const state = playingState()
     const actions = [GameAction.MoveLeft, GameAction.RotateCW]
     const originalLength = actions.length
     updateGameState(state, actions, 16)
@@ -295,7 +305,7 @@ describe('updateGameState — pure function', () => {
 
 describe('updateGameState — rotation', () => {
   it('RotateCW changes active piece rotation', () => {
-    const state = createGameState()
+    const state = playingState()
     const originalRotation = state.activePiece!.rotation
     const { state: after } = updateGameState(state, [GameAction.RotateCW], 16)
     if (after.activePiece) {
@@ -304,7 +314,7 @@ describe('updateGameState — rotation', () => {
   })
 
   it('RotateCCW changes active piece rotation in opposite direction', () => {
-    const state = createGameState()
+    const state = playingState()
     const { state: cw } = updateGameState(state, [GameAction.RotateCW], 16)
     const { state: ccw } = updateGameState(state, [GameAction.RotateCCW], 16)
     // CW and CCW should produce different rotations (for most pieces)
@@ -319,7 +329,7 @@ describe('updateGameState — rotation', () => {
 
 describe('updateGameState — null activePiece guard', () => {
   it('returns state unchanged when activePiece is null in playing phase', () => {
-    const state = createGameState()
+    const state = playingState()
     const nullState = { ...state, activePiece: null }
     const { state: after, events } = updateGameState(nullState, [GameAction.MoveLeft], 16)
     expect(after.activePiece).toBeNull()
@@ -329,7 +339,7 @@ describe('updateGameState — null activePiece guard', () => {
 
 describe('updateGameState — paused state returns unchanged for non-pause actions', () => {
   it('returns paused state unmodified when non-pause action sent while paused', () => {
-    const state = createGameState()
+    const state = playingState()
     const { state: paused } = updateGameState(state, [GameAction.Pause], 16)
     const { state: still, events } = updateGameState(paused, [GameAction.HardDrop], 16)
     expect(still.phase).toBe('paused')
@@ -338,10 +348,33 @@ describe('updateGameState — paused state returns unchanged for non-pause actio
   })
 })
 
+describe('updateGameState — intro phase', () => {
+  it('GameAction.Start transitions intro → playing', () => {
+    const state = createGameState()
+    expect(state.phase).toBe('intro')
+    const { state: after } = updateGameState(state, [GameAction.Start], 16)
+    expect(after.phase).toBe('playing')
+  })
+
+  it('no actions processed in intro phase except Start', () => {
+    const state = createGameState()
+    const originalPiece = state.activePiece
+    const { state: still } = updateGameState(state, [GameAction.MoveLeft, GameAction.HardDrop], 16)
+    expect(still.phase).toBe('intro')
+    expect(still.activePiece).toEqual(originalPiece)
+  })
+
+  it('no events emitted in intro phase without Start action', () => {
+    const state = createGameState()
+    const { events } = updateGameState(state, [GameAction.MoveLeft], 16)
+    expect(events).toHaveLength(0)
+  })
+})
+
 describe('updateGameState — gravity-triggered lock (no hard drop)', () => {
   it('piece locks via gravity lock delay expiring (not hard drop)', () => {
     // Set up a piece sitting on the floor and let the lock delay expire
-    let state = createGameState()
+    let state = playingState()
     const floorPiece = { type: 'T' as const, rotation: 0 as const, row: 18, col: 3 }
     state = {
       ...state,
@@ -365,7 +398,7 @@ describe('updateGameState — gravity-triggered lock (no hard drop)', () => {
   it('gravity-triggered lock with line clear scores points', () => {
     // Fill rows 16-19 with all cols except col 4, then place I-piece vertically
     // to fill col 4 and lock via gravity
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     for (let row = 16; row < 20; row++) {
       for (let col = 0; col < BOARD_COLS; col++) {
@@ -394,7 +427,7 @@ describe('updateGameState — gravity-triggered lock (no hard drop)', () => {
   })
 
   it('gravity-triggered lock with line clear causes level up when enough lines cleared', () => {
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     for (let row = 16; row < 20; row++) {
       for (let col = 0; col < BOARD_COLS; col++) {
@@ -420,7 +453,7 @@ describe('updateGameState — gravity-triggered lock (no hard drop)', () => {
   })
 
   it('gravity-triggered lock causes game-over when next spawn is blocked', () => {
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
 
     // Fill spawn area (row 0, cols 3-6) to block next I-piece spawn
@@ -454,7 +487,7 @@ describe('updateGameState — gravity-triggered lock (no hard drop)', () => {
 
 describe('updateGameState — SoftDrop action', () => {
   it('SoftDrop makes piece descend faster than normal gravity', () => {
-    const state = createGameState()
+    const state = playingState()
     // Without soft drop at level 1: 100ms dt should NOT drop
     const { state: normal } = updateGameState(state, [], 100)
     // With soft drop at level 1: 100ms * 20x = 2000ms effective, should drop 2 rows
@@ -467,7 +500,7 @@ describe('updateGameState — SoftDrop action', () => {
 
 describe('updateGameState — movement blocked', () => {
   it('MoveLeft does nothing when piece is against left wall', () => {
-    let state = createGameState()
+    let state = playingState()
     // Place T-piece at col 0
     const piece = { type: 'T' as const, rotation: 0 as const, row: 5, col: 0 }
     state = { ...state, activePiece: piece }
@@ -478,7 +511,7 @@ describe('updateGameState — movement blocked', () => {
   })
 
   it('MoveRight does nothing when piece is against right wall', () => {
-    let state = createGameState()
+    let state = playingState()
     // T-piece North has max col offset of 2, so at col 7, max cell is col 9
     const piece = { type: 'T' as const, rotation: 0 as const, row: 5, col: 7 }
     state = { ...state, activePiece: piece }
@@ -491,7 +524,7 @@ describe('updateGameState — movement blocked', () => {
 
 describe('updateGameState — rotation blocked', () => {
   it('RotateCW does not change piece when rotation is fully blocked', () => {
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     // Fill most of the board to block rotation kicks
     for (let row = 3; row < 8; row++) {
@@ -514,7 +547,7 @@ describe('updateGameState — rotation blocked', () => {
   })
 
   it('RotateCCW does not change piece when rotation is fully blocked', () => {
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     for (let row = 3; row < 8; row++) {
       for (let col = 0; col < BOARD_COLS; col++) {
@@ -537,7 +570,7 @@ describe('updateGameState — rotation blocked', () => {
 
 describe('updateGameState — scoring', () => {
   it('single line clear at level 1 scores 100', () => {
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     // Fill row 19 cols 0-8, leave col 9 empty
     for (let col = 0; col < 9; col++) {
@@ -553,7 +586,7 @@ describe('updateGameState — scoring', () => {
   })
 
   it('two line clear at level 1 scores 300', () => {
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     // Fill rows 18-19 cols 0-8
     for (let row = 18; row < 20; row++) {
@@ -571,7 +604,7 @@ describe('updateGameState — scoring', () => {
   })
 
   it('three line clear at level 1 scores 500', () => {
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     // Fill rows 17-19 cols 0-8
     for (let row = 17; row < 20; row++) {
@@ -589,7 +622,7 @@ describe('updateGameState — scoring', () => {
   })
 
   it('four line clear (Tetris) at level 2 scores 1600', () => {
-    let state = createGameState()
+    let state = playingState()
     let board = state.board
     for (let row = 16; row < 20; row++) {
       for (let col = 0; col < BOARD_COLS; col++) {
@@ -606,7 +639,7 @@ describe('updateGameState — scoring', () => {
 
 describe('updateGameState — lock resets gravity for movement', () => {
   it('MoveLeft resets lock timer during lock phase', () => {
-    let state = createGameState()
+    let state = playingState()
     const floorPiece = { type: 'T' as const, rotation: 0 as const, row: 18, col: 5 }
     state = {
       ...state,
@@ -622,7 +655,7 @@ describe('updateGameState — lock resets gravity for movement', () => {
   })
 
   it('RotateCW resets lock timer during lock phase', () => {
-    let state = createGameState()
+    let state = playingState()
     const floorPiece = { type: 'T' as const, rotation: 0 as const, row: 18, col: 5 }
     state = {
       ...state,
@@ -639,7 +672,7 @@ describe('updateGameState — lock resets gravity for movement', () => {
 
 describe('updateGameState — HardDrop without line clear', () => {
   it('HardDrop on empty board locks piece at bottom without line clear', () => {
-    const state = createGameState()
+    const state = playingState()
     const { state: after, events } = updateGameState(state, [GameAction.HardDrop], 16)
     const lockEvent = events.find(e => e.type === 'piece-lock')
     expect(lockEvent).toBeDefined()
@@ -652,7 +685,7 @@ describe('updateGameState — HardDrop without line clear', () => {
 
 describe('updateGameState — empty piece bag triggers reshuffle', () => {
   it('HardDrop with empty pieceBag still spawns a valid next piece', () => {
-    let state = createGameState()
+    let state = playingState()
     // Force the pieceBag to be empty so drawFromBag reshuffles
     state = { ...state, pieceBag: [] }
     const { state: after } = updateGameState(state, [GameAction.HardDrop], 16)
@@ -664,7 +697,7 @@ describe('updateGameState — empty piece bag triggers reshuffle', () => {
   })
 
   it('gravity-triggered lock with empty pieceBag still spawns a valid next piece', () => {
-    let state = createGameState()
+    let state = playingState()
     const floorPiece = { type: 'T' as const, rotation: 0 as const, row: 18, col: 3 }
     state = {
       ...state,
@@ -683,7 +716,7 @@ describe('updateGameState — empty piece bag triggers reshuffle', () => {
 
 describe('updateGameState — multiple actions in one tick', () => {
   it('MoveLeft and MoveRight in same tick cancel each other out', () => {
-    const state = createGameState()
+    const state = playingState()
     const originalCol = state.activePiece!.col
     // Both actions are processed independently: left then right
     const { state: after } = updateGameState(state, [GameAction.MoveLeft, GameAction.MoveRight], 16)
