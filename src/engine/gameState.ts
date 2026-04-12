@@ -31,7 +31,7 @@ export interface GameState {
   score: number
   level: number
   lines: number
-  phase: 'playing' | 'paused' | 'gameover'
+  phase: 'intro' | 'playing' | 'paused' | 'gameover'
   gravityState: GravityState
   /** 7-bag randomizer queue. Stored in state for purity (no module-level vars). */
   pieceBag: PieceType[]
@@ -126,7 +126,7 @@ export function createGameState(): GameState {
     score: 0,
     level: 1,
     lines: 0,
-    phase: 'playing',
+    phase: 'intro',
     gravityState: initialGravityState(),
     pieceBag: bag2,
   }
@@ -157,6 +157,13 @@ export function updateGameState(
   const events: GameEvent[] = []
 
   // --- Phase guard ---
+  if (state.phase === 'intro') {
+    if (actions.includes(GameAction.Start)) {
+      return { state: { ...state, phase: 'playing' }, events }
+    }
+    return { state, events }
+  }
+
   if (state.phase === 'gameover') {
     return { state, events }
   }

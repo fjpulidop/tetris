@@ -173,8 +173,11 @@ export class TouchInput {
 
   /**
    * Return actions for buttons currently held down.
+   * The deltaMs parameter is accepted for interface consistency with
+   * KeyboardInput but is intentionally ignored — touch buttons fire every tick.
    */
-  getHeldActions(): GameAction[] {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  getHeldActions(_deltaMs: number): GameAction[] {
     const actions: GameAction[] = []
     for (const btn of this.buttons) {
       if (btn.isHeld && btn.config.held) {

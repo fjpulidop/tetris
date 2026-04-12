@@ -158,6 +158,10 @@ export class HUD {
     }
   }
 
+  setVisible(visible: boolean): void {
+    this.container.visible = visible
+  }
+
   private drawNextPiecePreview(pieceType: string): void {
     this.nextPreview.clear()
 

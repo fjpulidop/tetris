@@ -22,6 +22,7 @@ export enum GameAction {
   SoftDrop = 'SoftDrop',
   HardDrop = 'HardDrop',
   Pause = 'Pause',
+  Start = 'Start',
 }
 
 /** Types of events the engine can emit during a tick. */
