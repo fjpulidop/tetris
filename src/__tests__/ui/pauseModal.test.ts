@@ -230,6 +230,133 @@ describe('PauseModal — onSelect callback', () => {
   })
 })
 
+describe('PauseModal — three options', () => {
+  let stage: FakeContainer
+  let modal: PauseModal
+
+  beforeEach(() => {
+    stage = makeStage()
+    modal = new PauseModal(stage as never)
+    modal.show()
+  })
+
+  it('renders exactly 3 interactive options', () => {
+    const panelRoot = stage.children[0]!
+    const interactives = collectInteractives(panelRoot)
+    expect(interactives).toHaveLength(3)
+  })
+
+  it('option labels are RESUME, RESTART, RETURN TO TITLE SCREEN', () => {
+    const allTexts = collectTexts(stage)
+    // Filter out the "PAUSED" title — option texts contain the label substring
+    const optionTexts = allTexts.filter(
+      t => t.text?.includes('RESUME') || t.text?.includes('RESTART') || t.text?.includes('RETURN TO TITLE SCREEN'),
+    )
+    expect(optionTexts).toHaveLength(3)
+    expect(optionTexts[0]!.text).toContain('RESUME')
+    expect(optionTexts[1]!.text).toContain('RESTART')
+    expect(optionTexts[2]!.text).toContain('RETURN TO TITLE SCREEN')
+  })
+
+  it('setSelection(2) highlights the third option with triangle prefix', () => {
+    modal.setSelection(2)
+    expect(modal.getSelection()).toBe(2)
+
+    const allTexts = collectTexts(stage)
+    const prefixed = allTexts.find(t => t.text?.startsWith('▶'))
+    expect(prefixed?.text).toContain('RETURN TO TITLE SCREEN')
+  })
+
+  it('setSelection(2) removes triangle prefix from other options', () => {
+    modal.setSelection(2)
+
+    const allTexts = collectTexts(stage)
+    const prefixedTexts = allTexts.filter(t => t.text?.startsWith('▶'))
+    expect(prefixedTexts).toHaveLength(1)
+    expect(prefixedTexts[0]!.text).toContain('RETURN TO TITLE SCREEN')
+  })
+
+  it('onSelect fires with index 2 when third option is clicked', () => {
+    const callback = vi.fn()
+    modal.onSelect = callback
+
+    const panelRoot = stage.children[0]!
+    const interactives = collectInteractives(panelRoot)
+
+    interactives[2]?.emit('pointerup')
+    expect(callback).toHaveBeenCalledWith(2)
+  })
+
+  it('clicking third option also updates internal selection to 2', () => {
+    const panelRoot = stage.children[0]!
+    const interactives = collectInteractives(panelRoot)
+
+    interactives[2]?.emit('pointerup')
+    expect(modal.getSelection()).toBe(2)
+  })
+
+  it('show(2) highlights the third option', () => {
+    modal.show(2)
+    expect(modal.getSelection()).toBe(2)
+
+    const allTexts = collectTexts(stage)
+    const prefixed = allTexts.find(t => t.text?.startsWith('▶'))
+    expect(prefixed?.text).toContain('RETURN TO TITLE SCREEN')
+  })
+})
+
+describe('PauseModal — selection wrapping with 3 options', () => {
+  let stage: FakeContainer
+  let modal: PauseModal
+  const OPTION_COUNT = 3
+
+  beforeEach(() => {
+    stage = makeStage()
+    modal = new PauseModal(stage as never)
+    modal.show()
+  })
+
+  it('wrapping down from last option (2) lands on 0', () => {
+    modal.setSelection(2)
+    // Simulate the wrap-around logic from main.ts: (2 + 1) % 3 === 0
+    const wrapped = (2 + 1) % OPTION_COUNT
+    modal.setSelection(wrapped)
+    expect(modal.getSelection()).toBe(0)
+
+    const allTexts = collectTexts(stage)
+    const prefixed = allTexts.find(t => t.text?.startsWith('▶'))
+    expect(prefixed?.text).toContain('RESUME')
+  })
+
+  it('wrapping up from first option (0) lands on 2', () => {
+    modal.setSelection(0)
+    // Simulate the wrap-around logic from main.ts: (0 - 1 + 3) % 3 === 2
+    const wrapped = (0 - 1 + OPTION_COUNT) % OPTION_COUNT
+    modal.setSelection(wrapped)
+    expect(modal.getSelection()).toBe(2)
+
+    const allTexts = collectTexts(stage)
+    const prefixed = allTexts.find(t => t.text?.startsWith('▶'))
+    expect(prefixed?.text).toContain('RETURN TO TITLE SCREEN')
+  })
+
+  it('cycling through all 3 options updates selection correctly each time', () => {
+    modal.setSelection(0)
+    expect(modal.getSelection()).toBe(0)
+
+    modal.setSelection(1)
+    expect(modal.getSelection()).toBe(1)
+
+    modal.setSelection(2)
+    expect(modal.getSelection()).toBe(2)
+
+    // Wrap back to 0
+    const wrapped = (2 + 1) % OPTION_COUNT
+    modal.setSelection(wrapped)
+    expect(modal.getSelection()).toBe(0)
+  })
+})
+
 describe('PauseModal — resize', () => {
   it('resize() does not throw when visible', () => {
     const stage = makeStage()
@@ -276,7 +403,7 @@ describe('PauseModal — visual state after setSelection', () => {
 
     const allTexts = collectTexts(stage)
     const prefixed = allTexts.find(t => t.text?.startsWith('▶'))
-    expect(prefixed?.text).toContain('TITLE SCREEN')
+    expect(prefixed?.text).toContain('RESTART')
   })
 })
 

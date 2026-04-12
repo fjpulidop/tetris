@@ -85,6 +85,8 @@ async function main(): Promise<void> {
   pauseModal.onSelect = (index: number) => {
     if (index === 0) {
       resumeFromPause()
+    } else if (index === 1) {
+      restartGame()
     } else {
       navigateToTitle()
     }
@@ -208,7 +210,7 @@ async function main(): Promise<void> {
    * exactly once when the pause modal is dismissed.
    */
   function attachPauseKeyListener(): () => void {
-    const OPTION_COUNT = 2
+    const OPTION_COUNT = 3
 
     const handler = (e: KeyboardEvent): void => {
       if (e.code === 'ArrowUp') {
@@ -223,6 +225,8 @@ async function main(): Promise<void> {
         e.preventDefault()
         if (pauseSelectedIndex === 0) {
           resumeFromPause()
+        } else if (pauseSelectedIndex === 1) {
+          restartGame()
         } else {
           navigateToTitle()
         }
@@ -261,29 +265,59 @@ async function main(): Promise<void> {
   }
 
   /**
-   * Navigate back to the title / intro screen.
+   * Restart the game immediately from a fresh state, bypassing the intro splash.
    *
-   * Soft-resets state to a fresh createGameState() snapshot (which always
-   * starts in 'intro'). Falls back to window.location.reload() only if the
-   * engine ever changes its initial phase.
+   * Creates a new game in 'playing' phase without showing the splash screen.
+   * The HUD remains visible. The splash screen is not recreated.
+   */
+  function restartGame(): void {
+    removePauseBlur()
+    pauseModal.hide()
+
+    if (removePauseKeyListener !== null) {
+      removePauseKeyListener()
+      removePauseKeyListener = null
+    }
+
+    const fresh = createGameState()
+    const result = updateGameState(fresh, [GameAction.Start], 0)
+    state = result.state
+    prevPhase = state.phase
+
+    hud.setVisible(true)
+  }
+
+  /**
+   * Navigate back to the title / intro screen, fully restoring the splash experience.
+   *
+   * Recreates the SplashScreen instance (destroyed on first intro→playing transition)
+   * and re-wires the canvas pointer listener for tap-to-start.
    */
   function navigateToTitle(): void {
     const freshState = createGameState()
-    if (freshState.phase === 'intro') {
-      // Engine supports intro phase — soft reset
-      state = freshState
-      // renderState mirrors state after the next loop iteration
-      removePauseBlur()
-      pauseModal.hide()
-      if (removePauseKeyListener !== null) {
-        removePauseKeyListener()
-        removePauseKeyListener = null
-      }
-      prevPhase = state.phase
-    } else {
-      // Fallback: reload the page
+    if (freshState.phase !== 'intro') {
       window.location.reload()
+      return
     }
+
+    removePauseBlur()
+    pauseModal.hide()
+    if (removePauseKeyListener !== null) {
+      removePauseKeyListener()
+      removePauseKeyListener = null
+    }
+
+    state = freshState
+    prevPhase = state.phase
+
+    splashScreen = new SplashScreen(splashContainer, app)
+    splashScreen.resize(window.innerWidth, window.innerHeight)
+
+    splashTapBuffer.splice(0)
+    // canvas is guaranteed non-null: main() throws before reaching this point otherwise
+    canvas!.addEventListener('pointerdown', onSplashTap)
+
+    hud.setVisible(false)
   }
 
   // --- Fixed-timestep game loop ---

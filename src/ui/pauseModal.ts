@@ -4,7 +4,8 @@
  * Renders a centered panel with a dark semi-transparent background,
  * a "PAUSED" title, and two interactive options:
  *   0 — RESUME
- *   1 — TITLE SCREEN
+ *   1 — RESTART
+ *   2 — RETURN TO TITLE SCREEN
  *
  * Lifecycle:
  *   - Construction does NOT add anything to the stage (hidden by default).
@@ -17,7 +18,7 @@
 
 import { Container, Graphics, Text, TextStyle } from 'pixi.js'
 
-const OPTION_LABELS = ['RESUME', 'TITLE SCREEN'] as const
+const OPTION_LABELS = ['RESUME', 'RESTART', 'RETURN TO TITLE SCREEN'] as const
 
 const COLOR_SELECTED = 0xf0f000
 const COLOR_UNSELECTED = 0x888888
@@ -35,14 +36,14 @@ const SELECTED_PREFIX = '▶ '
 const UNSELECTED_PREFIX = '  '
 
 export class PauseModal {
-  /** Called when the user confirms an option. Index 0 = Resume, 1 = Title Screen. */
+  /** Called when the user confirms an option. Index 0 = Resume, 1 = Restart, 2 = Return to Title Screen. */
   onSelect: (index: number) => void = () => undefined
 
   private stage: Container
   private panelRoot: Container
   private background: Graphics
   private titleText: Text
-  private optionTexts: [Text, Text]
+  private optionTexts: Text[]
   /** Index of the currently highlighted option. */
   private selectedIndex = 0
   /** Whether panelRoot is currently attached to the stage. */
@@ -69,14 +70,14 @@ export class PauseModal {
     this.titleText = new Text({ text: 'PAUSED', style: titleStyle })
     this.panelRoot.addChild(this.titleText)
 
-    // Option 0 — RESUME
     const opt0 = this.buildOptionText(0)
-    // Option 1 — TITLE SCREEN
     const opt1 = this.buildOptionText(1)
+    const opt2 = this.buildOptionText(2)
 
-    this.optionTexts = [opt0, opt1]
+    this.optionTexts = [opt0, opt1, opt2]
     this.panelRoot.addChild(opt0)
     this.panelRoot.addChild(opt1)
+    this.panelRoot.addChild(opt2)
 
     // Apply initial selection styling
     this.applySelectionStyles()
