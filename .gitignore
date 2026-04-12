@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Coverage
+coverage/
+
+# Claude Code
+.claude/agent-memory/
+.claude/backlog-cache.json
+.claude/pipeline-state/
+.claude/settings.json
+
+# Specrails
+.specrails/
