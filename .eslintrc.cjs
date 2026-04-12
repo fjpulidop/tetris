@@ -91,5 +91,5 @@ module.exports = {
     browser: true,
     es2022: true,
   },
-  ignorePatterns: ['dist/', 'node_modules/', '*.cjs', 'vite.config.ts', 'vitest.config.ts'],
+  ignorePatterns: ['dist/', 'node_modules/', 'coverage/', '*.cjs', 'vite.config.ts', 'vitest.config.ts'],
 };
