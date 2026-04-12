@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "change": "fix-pause-menu-rename-restart",
+  "agent": "reviewer",
+  "scored_at": "2026-04-12T18:35:41Z",
+  "overall": 91,
+  "aspects": {
+    "type_correctness": 95,
+    "pattern_adherence": 93,
+    "test_coverage": 90,
+    "security": 95,
+    "architectural_alignment": 88
+  },
+  "notes": {
+    "type_correctness": "All function signatures match existing codebase style. PauseModal.onSelect typed as (index: number) => void, consistent with HUD patterns. No implicit any introduced.",
+    "pattern_adherence": "3-option OPTION_LABELS const array follows the same as const tuple pattern used elsewhere. restartGame() and navigateToTitle() follow the same teardown order (blur, modal, key listener) as resumeFromPause(). OPTION_COUNT = 3 constant in attachPauseKeyListener matches the array length correctly.",
+    "test_coverage": "27 tests cover construction, show/hide, selection state, onSelect callback, three-option rendering, selection wrapping, resize, and visual prefix state. All acceptance criteria exercised. main.ts routing for Restart/Return to Title is not unit-tested (no main.ts test file) but is covered by code review — acceptable for wiring code.",
+    "security": "Pure UI state machine. No network I/O, no user data stored, no eval or dynamic code paths. window.location.reload() in navigateToTitle() fallback is a safe no-op guard path.",
+    "architectural_alignment": "PauseModal remains a dumb display component with no game-state knowledge. Routing to restartGame/navigateToTitle is correctly kept in main.ts. The createGameState() intro-phase guard in navigateToTitle() is defensive programming — functionally sound but slightly fragile if engine default phase changes; acceptable given the guard falls back to reload()."
+  },
+  "flags": []
+}
