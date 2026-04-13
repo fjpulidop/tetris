@@ -13,9 +13,11 @@
   "dependencies": {
     "@pixi/filter-bloom": "^5.0.0",
     "@pixi/filter-glow": "^5.0.0",
+    "howler": "^2.2.4",
     "pixi.js": "^8.0.0"
   },
   "devDependencies": {
+    "@types/howler": "^2.2.12",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "@vitest/coverage-v8": "^1.0.0",

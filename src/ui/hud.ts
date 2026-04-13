@@ -30,6 +30,9 @@ export class HUD {
   private linesValue: Text
   private nextLabel: Text
   private nextPreview: Graphics
+  private muteButton: Text
+  private _onMuteToggle: ((muted: boolean) => void) | null = null
+  private _muted = false
 
   // Cached values for change detection
   private lastScore = -1
@@ -68,6 +71,17 @@ export class HUD {
     ]) {
       this.container.addChild(elem)
     }
+
+    const muteStyle = new TextStyle({ fill: 0xffffff, fontSize: 12, fontFamily: 'monospace', fontWeight: 'bold' })
+    this.muteButton = new Text({ text: '[M] MUTE', style: muteStyle })
+    this.muteButton.eventMode = 'static'
+    this.muteButton.cursor = 'pointer'
+    this.muteButton.on('pointerup', () => {
+      this._muted = !this._muted
+      this.updateMuteLabel()
+      this._onMuteToggle?.(this._muted)
+    })
+    this.container.addChild(this.muteButton)
   }
 
   resize(cellSize: number, boardOffsetX: number): void {
@@ -90,7 +104,7 @@ export class HUD {
 
     // Draw panel background
     this.panel.clear()
-    this.panel.roundRect(0, 0, HUD_PANEL_WIDTH, 280, 8)
+    this.panel.roundRect(0, 0, HUD_PANEL_WIDTH, 320, 8)
     this.panel.fill({ color: PANEL_BACKGROUND, alpha: 0.85 })
 
     let y = 12
@@ -126,6 +140,10 @@ export class HUD {
 
     this.nextPreview.x = pad
     this.nextPreview.y = y
+
+    y += 60  // leave room below next-piece preview
+    this.muteButton.x = pad
+    this.muteButton.y = y
   }
 
   update(state: GameState): void {
@@ -160,6 +178,21 @@ export class HUD {
 
   setVisible(visible: boolean): void {
     this.container.visible = visible
+  }
+
+  /** Register callback invoked when the player clicks the mute button. */
+  setOnMuteToggle(callback: (muted: boolean) => void): void {
+    this._onMuteToggle = callback
+  }
+
+  /** Update the button label to reflect the current mute state. */
+  setMuted(muted: boolean): void {
+    this._muted = muted
+    this.updateMuteLabel()
+  }
+
+  private updateMuteLabel(): void {
+    this.muteButton.text = this._muted ? '[M] UNMUTE' : '[M] MUTE'
   }
 
   private drawNextPiecePreview(pieceType: string): void {
