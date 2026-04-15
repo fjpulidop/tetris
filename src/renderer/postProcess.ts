@@ -14,6 +14,19 @@ import type { Application, Filter } from 'pixi.js'
 import { GlowFilter } from '@pixi/filter-glow'
 import { BloomFilter } from '@pixi/filter-bloom'
 
+/** Controller returned by attachPostProcess() for dynamic post-process adjustments. */
+export interface PostProcessController {
+  setBloomSpike(strength: number, durationMs: number): void
+  tick(dtMs: number): void
+}
+
+function noOpController(): PostProcessController {
+  return {
+    setBloomSpike: () => undefined,
+    tick: () => undefined,
+  }
+}
+
 /**
  * Attach glow and bloom post-processing to the board and piece containers.
  * Does nothing on Canvas 2D renderer (filters require WebGL).
@@ -21,16 +34,17 @@ import { BloomFilter } from '@pixi/filter-bloom'
  * @param boardContainer - Container holding the board grid and locked cells
  * @param pieceContainer - Container holding the active piece and ghost
  * @param app - The PixiJS Application instance
+ * @returns A PostProcessController for dynamic adjustments
  */
 export function attachPostProcess(
   boardContainer: Container,
   pieceContainer: Container,
   app: Application
-): void {
+): PostProcessController {
   // Skip on Canvas 2D renderer — filters require WebGL
   // RendererType.CANVAS === 4 (bitfield enum in PixiJS v8)
   if (app.renderer.type === RendererType.CANVAS) {
-    return
+    return noOpController()
   }
 
   try {
@@ -40,12 +54,42 @@ export function attachPostProcess(
       new GlowFilter({ distance: 8, outerStrength: 1.5, color: 0xffffff }) as unknown as Filter,
     ]
 
+    const BASELINE_BLOOM = 1.2
+    type BloomFilterType = { blur: number } & Filter
+    const bloomFilter = new BloomFilter(BASELINE_BLOOM) as unknown as BloomFilterType
     pieceContainer.filters = [
       new GlowFilter({ distance: 12, outerStrength: 2, color: 0xffffff }) as unknown as Filter,
-      new BloomFilter(1.2) as unknown as Filter,
+      bloomFilter as unknown as Filter,
     ]
+
+    let spikeStrength = BASELINE_BLOOM
+    let spikeRemainingMs = 0
+    let spikeDurationMs = 1
+
+    const controller: PostProcessController = {
+      setBloomSpike(strength: number, durationMs: number): void {
+        spikeStrength = strength
+        spikeRemainingMs = durationMs
+        spikeDurationMs = durationMs
+        ;(bloomFilter as unknown as { blur: number }).blur = strength
+      },
+      tick(dtMs: number): void {
+        if (spikeRemainingMs <= 0) return
+        spikeRemainingMs -= dtMs
+        if (spikeRemainingMs <= 0) {
+          spikeRemainingMs = 0
+          ;(bloomFilter as unknown as { blur: number }).blur = BASELINE_BLOOM
+        } else {
+          const t = spikeRemainingMs / spikeDurationMs
+          const current = BASELINE_BLOOM + (spikeStrength - BASELINE_BLOOM) * t
+          ;(bloomFilter as unknown as { blur: number }).blur = current
+        }
+      },
+    }
+
+    return controller
   } catch (e) {
-    // If filter initialization fails for any reason, continue without effects
     console.warn('Post-processing filters could not be attached:', e)
+    return noOpController()
   }
 }
