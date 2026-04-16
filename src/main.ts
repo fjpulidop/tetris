@@ -25,6 +25,7 @@ import { PieceRenderer } from './renderer/pieceRenderer.js'
 import { EffectsRenderer } from './renderer/effects.js'
 import { attachPostProcess } from './renderer/postProcess.js'
 import type { PostProcessController } from './renderer/postProcess.js'
+import { ShakeEffect } from './renderer/shakeEffect.js'
 
 // Input
 import { KeyboardInput } from './input/keyboard.js'
@@ -81,6 +82,7 @@ async function main(): Promise<void> {
   const pieceRenderer = new PieceRenderer(pieceContainer)
   const effectsRenderer = new EffectsRenderer(effectsContainer)
   effectsRenderer.setPostProcessController(postProcessController)
+  const shakeEffect = new ShakeEffect(app.stage)
   const hud = new HUD(uiContainer)
   hud.setVisible(false)
   const pauseModal = new PauseModal(modalContainer)
@@ -370,10 +372,17 @@ async function main(): Promise<void> {
   // Snapshot for rendering — updated after each logic tick
   let renderState = state
 
+  // Combo tracking: consecutive ticks with at least one line-clear event
+  let consecutiveClearCount = 0
+
+  // Total elapsed render time in ms (for ghost piece animation, purely cosmetic)
+  let totalElapsedMs = 0
+
   function loop(now: DOMHighResTimeStamp): void {
     const delta = Math.min(now - lastTime, 200) // clamp to prevent spiral-of-death
     lastTime = now
     accumulator += delta
+    totalElapsedMs += delta
 
     // Drain accumulated time in fixed logic steps
     while (accumulator >= LOGIC_TICK_MS) {
@@ -415,14 +424,49 @@ async function main(): Promise<void> {
         hud.setVisible(true)
       }
 
+      // Update combo streak tracking based on events this tick
+      const hasLineClear = result.events.some(e => e.type === 'line-clear')
+      const hasPieceLock = result.events.some(e => e.type === 'piece-lock')
+      if (hasLineClear) {
+        consecutiveClearCount++
+      } else if (hasPieceLock && !hasLineClear) {
+        consecutiveClearCount = 0
+      }
+
       // Pass events to effects renderer and audio layer
       if (result.events.length > 0) {
-        const enrichedEvents = result.events.map(e =>
-          e.type === 'piece-lock'
-            ? { ...e, payload: { piece: stateBeforeTick.activePiece } }
-            : e
-        )
+        const enrichedEvents = result.events.map(e => {
+          if (e.type === 'piece-lock') {
+            return {
+              ...e,
+              payload: {
+                piece: stateBeforeTick.activePiece,
+                isHardDrop: allActions.includes(GameAction.HardDrop),
+              },
+            }
+          }
+          if (e.type === 'line-clear') {
+            return {
+              ...e,
+              payload: { ...(e.payload as object), combo: consecutiveClearCount },
+            }
+          }
+          return e
+        })
         effectsRenderer.onEvents(enrichedEvents)
+
+        // Trigger screen shake for hard drops and Tetris clears
+        for (const ev of enrichedEvents) {
+          if (ev.type === 'piece-lock') {
+            const p = ev.payload as { isHardDrop?: boolean }
+            if (p.isHardDrop) shakeEffect.triggerShake(6, 250)
+          }
+          if (ev.type === 'line-clear') {
+            const p = ev.payload as { count?: number }
+            if ((p.count ?? 0) >= 4) shakeEffect.triggerShake(10, 300)
+          }
+        }
+
         audioManager.onEvents(result.events)
       }
 
@@ -436,6 +480,7 @@ async function main(): Promise<void> {
 
     if (justPaused) {
       audioManager.onPhaseChange('paused')
+      shakeEffect.reset()
       // Game just transitioned into pause — show blur and modal
       pauseSelectedIndex = 0
       applyPauseBlur()
@@ -468,12 +513,13 @@ async function main(): Promise<void> {
 
     // Render at native display rate
     boardRenderer.update(renderState)
-    pieceRenderer.update(renderState)
+    pieceRenderer.update(renderState, totalElapsedMs / 1000)
     hud.update(renderState)
 
     // Advance effect animations (every render frame)
     effectsRenderer.tick(delta, renderState)
     postProcessController.tick(delta)
+    shakeEffect.tick(delta)
 
     requestAnimationFrame(loop)
   }

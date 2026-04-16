@@ -42,10 +42,15 @@ vi.mock('pixi.js', () => {
     clear(): this { return this }
     rect(): this { return this }
     roundRect(): this { return this }
+    circle(): this { return this }
     fill(): this { return this }
     setStrokeStyle(): this { return this }
     stroke(): this { return this }
     destroy(): void { /* no-op */ }
+  }
+
+  class MockColorMatrixFilter {
+    hue(): void { /* no-op */ }
   }
 
   class MockSprite extends MockContainer {
@@ -73,6 +78,7 @@ vi.mock('pixi.js', () => {
     Graphics: MockGraphics,
     Sprite: MockSprite,
     Texture: MockTexture,
+    ColorMatrixFilter: MockColorMatrixFilter,
   }
 })
 

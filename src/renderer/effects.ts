@@ -1,19 +1,22 @@
 /**
  * Line-clear particle and flash effects, plus piece-lock burst, scaled line-clear
- * overlays, full-screen Tetris flash, level-up tint, and active-piece shimmer.
+ * overlays, full-screen Tetris flash, level-up tint, active-piece shimmer,
+ * combo ripple rings, rainbow hue cycling on Tetris flash, and chromatic
+ * aberration flash on level-up.
  *
- * Flash effect: white rectangle overlay per cleared row, fades over 200ms.
+ * Flash effect: left-to-right sweep wipe per cleared row (80ms), then fade (120ms).
  * Particle effect: pool of 300 pre-allocated sprites, upward bias, alpha fade.
  * Piece-lock burst: ≥20 radial particles in the locked piece's Guideline color.
  * Edge pulse: screen-edge stroke overlay, scaled to line-clear count.
- * Tetris flash: full-viewport white flash for 4-line clears.
- * Level-up tint: gold background tint + edge pulse on level-up event.
+ * Tetris flash: full-viewport rainbow flash for 4-line clears (300ms).
+ * Level-up tint: chromatic aberration flash (300ms) + gold edge pulse.
+ * Combo ripple: expanding ring(s) from board center on consecutive clears.
  * Shimmer: oscillating white overlay on active-piece cells.
  */
 
-import { Container, Graphics, Sprite, Texture } from 'pixi.js'
+import { Container, Graphics, Sprite, Texture, ColorMatrixFilter } from 'pixi.js'
 import type { GameEvent } from '../engine/types.js'
-import { BOARD_COLS } from '../engine/board.js'
+import { BOARD_COLS, BOARD_ROWS } from '../engine/board.js'
 import { getCells } from '../engine/rotation.js'
 import type { ActivePiece } from '../engine/rotation.js'
 import { PIECE_COLORS } from '../engine/pieces.js'
@@ -57,6 +60,18 @@ const TETRIS_FLASH_ALPHA = 0.8
 /** Level-up tint overlay duration in ms. */
 const LEVEL_UP_TINT_DURATION_MS = 800
 
+/** Duration of the row sweep wipe phase in ms (within FLASH_DURATION_MS total). */
+const FLASH_SWEEP_PHASE_MS = 80
+
+/** Duration and peak alpha for the chromatic aberration flash on level-up. */
+const CHROMA_FLASH_DURATION_MS = 300
+const CHROMA_SHIFT_PX = 3
+const CHROMA_PEAK_ALPHA = 0.35
+
+/** Duration and maximum radius for combo ripple rings. */
+const RIPPLE_DURATION_MS = 400
+const RIPPLE_MAX_RADIUS = 160 // px; roughly half the board diagonal at default cell size
+
 interface Particle {
   sprite: Sprite
   vx: number
@@ -68,7 +83,20 @@ interface Particle {
 
 interface FlashEffect {
   graphics: Graphics
-  life: number     // ms remaining
+  life: number        // ms remaining
+  totalLife: number   // total duration (ms)
+  sweepPhaseMs: number // duration of the left-to-right wipe phase
+  row: number         // board row index (for redrawing during sweep)
+}
+
+interface RippleState {
+  graphics: Graphics
+  life: number
+  maxLife: number
+  cx: number
+  cy: number
+  color: number
+  peakAlpha: number
 }
 
 export class EffectsRenderer {
@@ -106,6 +134,17 @@ export class EffectsRenderer {
 
   /** PostProcessController for triggering bloom spikes. */
   private postProcessController: import('./postProcess.js').PostProcessController | null = null
+
+  /** ColorMatrixFilter for rainbow hue cycling during Tetris flash. */
+  private tetrisHueFilter: ColorMatrixFilter | null = null
+
+  /** Chromatic aberration overlays for level-up flash. */
+  private chromaRedOverlay: Graphics
+  private chromaBlueOverlay: Graphics
+  private chromaFlashLife = 0
+
+  /** Combo ripple rings (pre-allocated, up to 2 simultaneous). */
+  private ripples: RippleState[]
 
   constructor(stage: Container) {
     this.boardContainer = new Container()
@@ -154,6 +193,26 @@ export class EffectsRenderer {
     this.levelUpOverlay = new Graphics()
     this.levelUpOverlay.visible = false
     this.screenContainer.addChild(this.levelUpOverlay)
+
+    // Chromatic aberration overlays for level-up flash
+    this.chromaRedOverlay = new Graphics()
+    this.chromaRedOverlay.visible = false
+    this.screenContainer.addChild(this.chromaRedOverlay)
+
+    this.chromaBlueOverlay = new Graphics()
+    this.chromaBlueOverlay.visible = false
+    this.screenContainer.addChild(this.chromaBlueOverlay)
+
+    // Pre-allocate two combo ripple ring Graphics (board-relative)
+    const ripple0Graphics = new Graphics()
+    this.boardContainer.addChild(ripple0Graphics)
+    const ripple1Graphics = new Graphics()
+    this.boardContainer.addChild(ripple1Graphics)
+
+    this.ripples = [
+      { graphics: ripple0Graphics, life: 0, maxLife: RIPPLE_DURATION_MS, cx: 0, cy: 0, color: 0xffffff, peakAlpha: 0.5 },
+      { graphics: ripple1Graphics, life: 0, maxLife: RIPPLE_DURATION_MS, cx: 0, cy: 0, color: 0xffffff, peakAlpha: 0.5 },
+    ]
   }
 
   resize(cellSize: number, offsetX: number, offsetY: number): void {
@@ -181,9 +240,13 @@ export class EffectsRenderer {
   onEvents(events: GameEvent[]): void {
     for (const event of events) {
       if (event.type === 'line-clear') {
-        const payload = event.payload as { rows: number[]; count: number } | undefined
+        const payload = event.payload as { rows: number[]; count: number; combo?: number } | undefined
         if (payload && Array.isArray(payload.rows)) {
           this.triggerLineClearEffects(payload.rows, payload.count ?? 1)
+          const combo = payload.combo ?? 1
+          if (combo >= 2) {
+            this.triggerComboRipple(combo)
+          }
         }
       }
       if (event.type === 'piece-lock') {
@@ -222,14 +285,16 @@ export class EffectsRenderer {
 
   private triggerFlash(row: number): void {
     const g = new Graphics()
-    const y = row * this.cellSize
-    const width = BOARD_COLS * this.cellSize
-
-    g.rect(0, y, width, this.cellSize)
-    g.fill({ color: 0xffffff, alpha: 1 })
+    // Start with zero width — the sweep phase will expand it left-to-right
     this.boardContainer.addChild(g)
 
-    this.activeFlashes.push({ graphics: g, life: FLASH_DURATION_MS })
+    this.activeFlashes.push({
+      graphics: g,
+      life: FLASH_DURATION_MS,
+      totalLife: FLASH_DURATION_MS,
+      sweepPhaseMs: FLASH_SWEEP_PHASE_MS,
+      row,
+    })
   }
 
   private triggerParticles(row: number, color = 0xffffff, count = PARTICLES_PER_ROW, size = 4): void {
@@ -333,6 +398,13 @@ export class EffectsRenderer {
     g.alpha = TETRIS_FLASH_ALPHA
     this.tetrisFlashLife = TETRIS_FLASH_DURATION_MS
 
+    // Attach rainbow hue filter — reset to 0 degrees for a fresh cycle
+    if (this.tetrisHueFilter === null) {
+      this.tetrisHueFilter = new ColorMatrixFilter()
+    }
+    this.tetrisHueFilter.hue(0, false)
+    this.tetrisFlashOverlay.filters = [this.tetrisHueFilter as unknown as import('pixi.js').Filter]
+
     this.postProcessController?.setBloomSpike(4.0, 500)
   }
 
@@ -363,6 +435,63 @@ export class EffectsRenderer {
       overlay.alpha = 0.15
       this.levelUpLife = LEVEL_UP_TINT_DURATION_MS
     }
+
+    // RGB-split chromatic aberration flash
+    this.triggerChromaFlash()
+  }
+
+  private triggerChromaFlash(): void {
+    const w = this.screenW
+    const h = this.screenH
+
+    this.chromaRedOverlay.clear()
+    this.chromaRedOverlay.rect(-CHROMA_SHIFT_PX, 0, w, h)
+    this.chromaRedOverlay.fill({ color: 0xff0000, alpha: 1 })
+    this.chromaRedOverlay.visible = true
+    this.chromaRedOverlay.alpha = CHROMA_PEAK_ALPHA
+
+    this.chromaBlueOverlay.clear()
+    this.chromaBlueOverlay.rect(CHROMA_SHIFT_PX, 0, w, h)
+    this.chromaBlueOverlay.fill({ color: 0x0000ff, alpha: 1 })
+    this.chromaBlueOverlay.visible = true
+    this.chromaBlueOverlay.alpha = CHROMA_PEAK_ALPHA
+
+    this.chromaFlashLife = CHROMA_FLASH_DURATION_MS
+  }
+
+  private triggerComboRipple(combo: number): void {
+    const cx = (BOARD_COLS / 2) * this.cellSize
+    const cy = (BOARD_ROWS / 2) * this.cellSize
+    const color = CELL_COLORS[(combo % 7) + 1] ?? 0xffffff
+    const peakAlpha = Math.min(0.9, 0.4 + combo * 0.1)
+
+    // Find the first inactive ripple slot, or the older (further-decayed) active one
+    let slot = this.ripples.find(r => r.life <= 0)
+    if (slot === undefined) {
+      // Both active — evict the one with less life remaining (older)
+      slot = this.ripples[0]!.life <= this.ripples[1]!.life
+        ? this.ripples[0]!
+        : this.ripples[1]!
+    }
+    slot.cx = cx
+    slot.cy = cy
+    slot.color = color
+    slot.peakAlpha = peakAlpha
+    slot.maxLife = RIPPLE_DURATION_MS
+    slot.life = RIPPLE_DURATION_MS
+
+    // For combo >= 3, spawn a second ring slightly ahead in time so it appears 80ms after
+    if (combo >= 3) {
+      const slot2 = this.ripples.find(r => r !== slot && r.life <= 0)
+        ?? (this.ripples[0] === slot ? this.ripples[1]! : this.ripples[0]!)
+      slot2.cx = cx
+      slot2.cy = cy
+      slot2.color = CELL_COLORS[((combo + 1) % 7) + 1] ?? 0xffffff
+      slot2.peakAlpha = peakAlpha
+      slot2.maxLife = RIPPLE_DURATION_MS
+      // Start life shorter so the ring appears to begin 80ms later visually
+      slot2.life = RIPPLE_DURATION_MS - 80
+    }
   }
 
   /**
@@ -392,16 +521,35 @@ export class EffectsRenderer {
       this.shimmerGraphics.visible = false
     }
 
-    // Update flash effects
+    // Update flash effects (left-to-right sweep, then alpha fade)
     for (let i = this.activeFlashes.length - 1; i >= 0; i--) {
       const flash = this.activeFlashes[i]!
       flash.life -= dtMs
-      flash.graphics.alpha = Math.max(0, flash.life / FLASH_DURATION_MS)
 
       if (flash.life <= 0) {
         this.boardContainer.removeChild(flash.graphics)
         flash.graphics.destroy()
         this.activeFlashes.splice(i, 1)
+        continue
+      }
+
+      const age = flash.totalLife - flash.life
+      const g = flash.graphics
+      const y = flash.row * this.cellSize
+      const maxWidth = BOARD_COLS * this.cellSize
+
+      if (age < flash.sweepPhaseMs) {
+        // Sweep phase: expand width left-to-right
+        const progress = age / flash.sweepPhaseMs
+        g.clear()
+        g.rect(0, y, maxWidth * progress, this.cellSize)
+        g.fill({ color: 0xffffff, alpha: 1 })
+        g.alpha = 1
+      } else {
+        // Fade phase: full width, decreasing alpha
+        const fadeRemaining = flash.life
+        const fadeDuration = flash.totalLife - flash.sweepPhaseMs
+        g.alpha = Math.max(0, fadeRemaining / fadeDuration)
       }
     }
 
@@ -436,17 +584,25 @@ export class EffectsRenderer {
       }
     }
 
-    // Update Tetris flash overlay
+    // Update Tetris flash overlay (with rainbow hue cycling)
     if (this.tetrisFlashLife > 0) {
       this.tetrisFlashLife -= dtMs
       if (this.tetrisFlashLife <= 0) {
         this.tetrisFlashOverlay.visible = false
+        this.tetrisFlashOverlay.filters = []
         this.tetrisFlashLife = 0
       } else {
         this.tetrisFlashOverlay.alpha = Math.max(
           0,
           (this.tetrisFlashLife / TETRIS_FLASH_DURATION_MS) * TETRIS_FLASH_ALPHA
         )
+        // Cycle hue: 90 degrees per second
+        if (this.tetrisHueFilter !== null) {
+          this.tetrisHueFilter.hue(
+            (90 * this.tetrisFlashLife / TETRIS_FLASH_DURATION_MS) % 360,
+            false
+          )
+        }
       }
     }
 
@@ -461,6 +617,40 @@ export class EffectsRenderer {
           0,
           (this.levelUpLife / LEVEL_UP_TINT_DURATION_MS) * 0.15
         )
+      }
+    }
+
+    // Update chromatic aberration flash (level-up RGB-split)
+    if (this.chromaFlashLife > 0) {
+      this.chromaFlashLife -= dtMs
+      if (this.chromaFlashLife <= 0) {
+        this.chromaRedOverlay.visible = false
+        this.chromaBlueOverlay.visible = false
+        this.chromaFlashLife = 0
+      } else {
+        const t = this.chromaFlashLife / CHROMA_FLASH_DURATION_MS
+        this.chromaRedOverlay.alpha = CHROMA_PEAK_ALPHA * t
+        this.chromaBlueOverlay.alpha = CHROMA_PEAK_ALPHA * t
+      }
+    }
+
+    // Update combo ripple rings
+    for (const ripple of this.ripples) {
+      if (ripple.life <= 0) continue
+
+      const t = 1 - (ripple.life / ripple.maxLife) // 0→1 over lifetime
+      const radius = RIPPLE_MAX_RADIUS * t
+      const alpha = ripple.peakAlpha * (1 - t)
+      const g = ripple.graphics
+
+      g.clear()
+      g.setStrokeStyle({ width: 2, color: ripple.color, alpha })
+      g.circle(ripple.cx, ripple.cy, radius)
+      g.stroke()
+
+      ripple.life -= dtMs
+      if (ripple.life <= 0) {
+        g.clear()
       }
     }
   }

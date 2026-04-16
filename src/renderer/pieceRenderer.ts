@@ -16,8 +16,6 @@ import { CELL_COLORS } from './boardRenderer.js'
 /** Corner radius for piece cells (matches board renderer). */
 const CELL_RADIUS = 2
 
-/** Alpha for ghost piece. */
-const GHOST_ALPHA = 0.3
 
 export class PieceRenderer {
   private container: Container
@@ -46,7 +44,7 @@ export class PieceRenderer {
     this.ghostCells = []
     for (let i = 0; i < 4; i++) {
       const g = new Graphics()
-      g.alpha = GHOST_ALPHA
+      // Alpha is set per-frame in update() via the ghost pulse animation
       this.container.addChild(g)
       this.ghostCells.push(g)
     }
@@ -61,7 +59,7 @@ export class PieceRenderer {
     this.container.y = offsetY
   }
 
-  update(state: GameState): void {
+  update(state: GameState, elapsedSec = 0): void {
     if (this.cellSize === 0) return
 
     const piece = state.activePiece
@@ -83,9 +81,12 @@ export class PieceRenderer {
     const activeCells = getCells(piece)
 
     // Draw ghost piece (only if it's different from active piece position)
+    // Alpha oscillates via sin wave: range 0.12–0.32 at ~1Hz
+    const ghostAlpha = 0.22 + 0.10 * Math.sin(elapsedSec * Math.PI * 2)
     const ghostDiffers = ghostPiece.row !== piece.row
     for (let i = 0; i < 4; i++) {
       const g = this.ghostCells[i]!
+      g.alpha = ghostAlpha
       g.clear()
 
       if (ghostDiffers) {
