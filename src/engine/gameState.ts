@@ -16,6 +16,12 @@ import { tryRotate, getCells } from './rotation.js'
 import type { GravityState } from './gravity.js'
 import { applyGravity, initialGravityState, resetLockTimer } from './gravity.js'
 import { detectFullRows, clearRows } from './lineClear.js'
+import {
+  chainMultiplier,
+  generateChargedCells,
+  resolveExplosions,
+  tickChargeDecay,
+} from './chainBlast.js'
 
 // Re-export ActivePiece for consumers
 export type { ActivePiece }
@@ -35,6 +41,12 @@ export interface GameState {
   gravityState: GravityState
   /** 7-bag randomizer queue. Stored in state for purity (no module-level vars). */
   pieceBag: PieceType[]
+  /** Flat cell indices (row * BOARD_COLS + col) that are currently charged. */
+  chargedCells: ReadonlySet<number>
+  /** Current chain explosion depth (incremented on each successive explosion). */
+  chainDepth: number
+  /** Milliseconds elapsed since the last piece lock (used for decay/reset timers). */
+  chainTimer: number
 }
 
 /**
@@ -129,6 +141,136 @@ export function createGameState(): GameState {
     phase: 'intro',
     gravityState: initialGravityState(),
     pieceBag: bag2,
+    chargedCells: new Set<number>(),
+    chainDepth: 0,
+    chainTimer: 0,
+  }
+}
+
+/** Result returned by the processLock helper. */
+interface LockResult {
+  board: Board
+  score: number
+  lines: number
+  level: number
+  chargedCells: ReadonlySet<number>
+  chainDepth: number
+  chainTimer: number
+  events: GameEvent[]
+}
+
+/**
+ * Handle all post-lock processing: line detection, scoring, chain explosions,
+ * and level-up checks. Extracted so both hard-drop and gravity-lock branches
+ * share the same logic without duplication.
+ *
+ * CRITICAL: fullRows is computed BEFORE clearRows. generateChargedCells and
+ * resolveExplosions receive pre-collapse row coordinates so detonator
+ * identification is correct. resolveExplosions operates on the post-collapse
+ * board but uses pre-collapse row numbers to find detonators.
+ */
+function processLock(
+  board: Board,
+  score: number,
+  lines: number,
+  level: number,
+  chargedCells: ReadonlySet<number>,
+  chainDepth: number,
+  chainTimer: number,
+  piece: ActivePiece
+): LockResult {
+  const events: GameEvent[] = []
+
+  // Lock piece onto board
+  let currentBoard = lockPieceOntoBoard(board, piece)
+  events.push({ type: 'piece-lock' })
+
+  let currentScore = score
+  let currentLines = lines
+  let currentLevel = level
+  let currentCharged = chargedCells
+  let currentChainDepth = chainDepth
+  let currentChainTimer = chainTimer
+
+  const fullRows = detectFullRows(currentBoard)
+  if (fullRows.length > 0) {
+    const clearedCount = fullRows.length
+
+    // Compute base multiplier using current depth (BEFORE any explosion increment)
+    const baseMultiplier = chainMultiplier(currentChainDepth)
+
+    // Collapse the board
+    currentBoard = clearRows(currentBoard, fullRows)
+
+    currentScore += Math.round(scoreForLines(clearedCount, currentLevel) * baseMultiplier)
+    currentLines += clearedCount
+
+    events.push({ type: 'line-clear', payload: { count: clearedCount, rows: fullRows } })
+
+    // Generate new charged cells from rows above the cleared rows (pre-collapse coords)
+    const newChargedFlat = generateChargedCells(fullRows, currentBoard, currentCharged)
+
+    // Resolve explosions — detonators identified by pre-collapse row numbers
+    const explosionResult = resolveExplosions(currentBoard, currentCharged, fullRows)
+
+    if (explosionResult.affectedArea.length > 0) {
+      // Chain explosion occurred
+      currentChainDepth += 1
+      currentChainTimer = 0
+      currentBoard = explosionResult.board
+
+      // Bonus score uses incremented depth
+      const bonusMultiplier = chainMultiplier(currentChainDepth)
+      currentScore += Math.round(
+        scoreForLines(explosionResult.bonusRows.length, currentLevel) * bonusMultiplier
+      )
+      currentLines += explosionResult.bonusRows.length
+
+      // Merge new charged cells from primary clear and from explosion bonus rows
+      currentCharged = new Set([...newChargedFlat, ...explosionResult.newChargedCells])
+
+      events.push({
+        type: 'chain-explosion',
+        payload: {
+          depth: currentChainDepth,
+          affectedArea: explosionResult.affectedArea,
+          bonusRows: explosionResult.bonusRows,
+        },
+      })
+
+      if (explosionResult.bonusRows.length > 0) {
+        events.push({
+          type: 'line-clear',
+          payload: { count: explosionResult.bonusRows.length, rows: explosionResult.bonusRows },
+        })
+      }
+    } else {
+      // No explosion — reset timer but keep depth
+      currentChainTimer = 0
+      currentCharged = new Set([...currentCharged, ...newChargedFlat])
+    }
+
+    if (newChargedFlat.length > 0) {
+      events.push({ type: 'cell-charged' })
+    }
+
+    // Level-up check
+    const newLevel = Math.floor(currentLines / 10) + 1
+    if (newLevel > currentLevel) {
+      currentLevel = newLevel
+      events.push({ type: 'level-up', payload: { level: currentLevel } })
+    }
+  }
+
+  return {
+    board: currentBoard,
+    score: currentScore,
+    lines: currentLines,
+    level: currentLevel,
+    chargedCells: currentCharged,
+    chainDepth: currentChainDepth,
+    chainTimer: currentChainTimer,
+    events,
   }
 }
 
@@ -195,6 +337,9 @@ export function updateGameState(
   let lines = state.lines
   let pieceBag = state.pieceBag
   let nextPiece = state.nextPiece
+  let chargedCells = state.chargedCells
+  let chainDepth = state.chainDepth
+  let chainTimer = state.chainTimer
 
   const softDrop = actions.includes(GameAction.SoftDrop)
 
@@ -238,29 +383,33 @@ export function updateGameState(
     }
     piece = { ...piece, row: dropRow }
 
-    // Lock immediately
-    board = lockPieceOntoBoard(board, piece)
-    events.push({ type: 'piece-lock' })
+    // Process lock (line clear, chain explosions, scoring)
+    const lockResult = processLock(
+      board,
+      score,
+      lines,
+      level,
+      chargedCells,
+      chainDepth,
+      chainTimer,
+      piece
+    )
 
-    // Check for line clears
-    const fullRows = detectFullRows(board)
-    if (fullRows.length > 0) {
-      board = clearRows(board, fullRows)
-      const clearedCount = fullRows.length
-      const pointsGained = scoreForLines(clearedCount, level)
-      score += pointsGained
-      lines += clearedCount
+    board = lockResult.board
+    score = lockResult.score
+    lines = lockResult.lines
+    level = lockResult.level
+    chargedCells = lockResult.chargedCells
+    chainDepth = lockResult.chainDepth
+    chainTimer = lockResult.chainTimer
+    events.push(...lockResult.events)
 
-      events.push({ type: 'line-clear', payload: { count: clearedCount, rows: fullRows } })
-
-      // Check level up
-      const prevLevel = level
-      const newLevel = Math.floor(lines / 10) + 1
-      if (newLevel > prevLevel) {
-        level = newLevel
-        events.push({ type: 'level-up', payload: { level } })
-      }
-    }
+    // Apply decay tick
+    const decay = tickChargeDecay(chargedCells, chainDepth, chainTimer, dtMs)
+    chargedCells = decay.chargedCells
+    chainDepth = decay.chainDepth
+    chainTimer = decay.chainTimer
+    if (decay.emitChainReset) events.push({ type: 'chain-reset' })
 
     // Spawn next piece
     const draw = drawFromBag(pieceBag)
@@ -284,6 +433,9 @@ export function updateGameState(
           phase: 'gameover',
           gravityState: initialGravityState(),
           pieceBag,
+          chargedCells,
+          chainDepth,
+          chainTimer,
         },
         events,
       }
@@ -301,6 +453,9 @@ export function updateGameState(
         phase: 'playing',
         gravityState: initialGravityState(),
         pieceBag,
+        chargedCells,
+        chainDepth,
+        chainTimer,
       },
       events,
     }
@@ -313,29 +468,33 @@ export function updateGameState(
   const shouldLock = gravResult.locked
 
   if (shouldLock) {
-    // Lock piece onto board
-    board = lockPieceOntoBoard(board, piece)
-    events.push({ type: 'piece-lock' })
+    // Process lock (line clear, chain explosions, scoring)
+    const lockResult = processLock(
+      board,
+      score,
+      lines,
+      level,
+      chargedCells,
+      chainDepth,
+      chainTimer,
+      piece
+    )
 
-    // Detect and clear full lines
-    const fullRows = detectFullRows(board)
-    if (fullRows.length > 0) {
-      board = clearRows(board, fullRows)
-      const clearedCount = fullRows.length
-      const pointsGained = scoreForLines(clearedCount, level)
-      score += pointsGained
-      lines += clearedCount
+    board = lockResult.board
+    score = lockResult.score
+    lines = lockResult.lines
+    level = lockResult.level
+    chargedCells = lockResult.chargedCells
+    chainDepth = lockResult.chainDepth
+    chainTimer = lockResult.chainTimer
+    events.push(...lockResult.events)
 
-      events.push({ type: 'line-clear', payload: { count: clearedCount, rows: fullRows } })
-
-      // Check level up
-      const prevLevel = level
-      const newLevel = Math.floor(lines / 10) + 1
-      if (newLevel > prevLevel) {
-        level = newLevel
-        events.push({ type: 'level-up', payload: { level } })
-      }
-    }
+    // Apply decay tick
+    const decay = tickChargeDecay(chargedCells, chainDepth, chainTimer, dtMs)
+    chargedCells = decay.chargedCells
+    chainDepth = decay.chainDepth
+    chainTimer = decay.chainTimer
+    if (decay.emitChainReset) events.push({ type: 'chain-reset' })
 
     // Spawn next piece
     const draw = drawFromBag(pieceBag)
@@ -359,6 +518,9 @@ export function updateGameState(
           phase: 'gameover',
           gravityState: initialGravityState(),
           pieceBag,
+          chargedCells,
+          chainDepth,
+          chainTimer,
         },
         events,
       }
@@ -376,12 +538,21 @@ export function updateGameState(
         phase: 'playing',
         gravityState: initialGravityState(),
         pieceBag,
+        chargedCells,
+        chainDepth,
+        chainTimer,
       },
       events,
     }
   }
 
-  // No lock event — return updated state
+  // No lock event — apply decay tick and return updated state
+  const decay = tickChargeDecay(chargedCells, chainDepth, chainTimer, dtMs)
+  chargedCells = decay.chargedCells
+  chainDepth = decay.chainDepth
+  chainTimer = decay.chainTimer
+  if (decay.emitChainReset) events.push({ type: 'chain-reset' })
+
   return {
     state: {
       ...state,
@@ -393,6 +564,9 @@ export function updateGameState(
       lines,
       gravityState,
       pieceBag,
+      chargedCells,
+      chainDepth,
+      chainTimer,
     },
     events,
   }

@@ -26,7 +26,14 @@ export enum GameAction {
 }
 
 /** Types of events the engine can emit during a tick. */
-export type GameEventType = 'line-clear' | 'piece-lock' | 'level-up' | 'game-over'
+export type GameEventType =
+  | 'line-clear'
+  | 'piece-lock'
+  | 'level-up'
+  | 'game-over'
+  | 'cell-charged'
+  | 'chain-explosion'
+  | 'chain-reset'
 
 /** An event emitted by the engine. Payload is event-specific. */
 export interface GameEvent {

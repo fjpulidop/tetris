@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "change": "chain-blast-cascading-line-clear-explosions",
+  "agent": "reviewer",
+  "scored_at": "2026-04-16T00:18:00Z",
+  "overall": 92,
+  "aspects": {
+    "type_correctness": 95,
+    "pattern_adherence": 93,
+    "test_coverage": 90,
+    "security": 95,
+    "architectural_alignment": 95
+  },
+  "notes": {
+    "type_correctness": "All new interfaces (ExplosionResult, DecayResult, LockResult) are fully typed. chargedCells uses ReadonlySet<number> consistently. GameState extension fields have correct types.",
+    "pattern_adherence": "chainBlast.ts follows the pure-function pattern established by other engine modules. processLock helper correctly extracts shared logic. One pre-existing non-null assertion warning in drawFromBag (line 80) is pre-existing and not introduced by this change.",
+    "test_coverage": "chainBlast.ts hits 100% branch coverage. gameState.ts chain-blast integration describe block covers primary paths. Uncovered lines 242-246 in gameState.ts are pre-existing gaps unrelated to this feature.",
+    "security": "No new attack surface. All inputs are typed, no string eval, no DOM manipulation in engine layer.",
+    "architectural_alignment": "Engine layer stays pure — no renderer/input/ui imports in chainBlast.ts or the chain-blast additions to gameState.ts. Renderer and HUD integrate via events only, respecting layer boundaries."
+  },
+  "flags": []
+}
