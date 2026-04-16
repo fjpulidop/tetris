@@ -1,0 +1,25 @@
+{
+  "schema_version": "1",
+  "change": "enhanced-visual-effects-particle-systems",
+  "agent": "reviewer",
+  "scored_at": "2026-04-16T01:13:00Z",
+  "overall": 91,
+  "aspects": {
+    "type_correctness": 88,
+    "pattern_adherence": 93,
+    "test_coverage": 90,
+    "security": 98,
+    "architectural_alignment": 95
+  },
+  "notes": {
+    "type_correctness": "GameEvent.payload is typed as unknown throughout; effects.ts casts it with a local inline type assertion. This is correct given the engine's deliberately untyped payload field, but it means the cast is unchecked. The `count` field IS present in the engine emission (gameState.ts lines 254, 329), so the cast is safe in practice. The `?? 1` fallback is properly defensive.",
+    "pattern_adherence": "All new code follows existing PixiJS pre-allocation patterns (pool of 300 sprites constructed once, Graphics overlays reused via clear()). One `@typescript-eslint/no-explicit-any` warning in the test file (line 131) — acceptable for a private-field accessor cast in tests; consistent with how other test files handle private-field introspection.",
+    "test_coverage": "12 tests cover pool size, piece-lock burst activation count, edge pulse scaling for counts 1/2/3/4, Tetris flash trigger, level-up overlays, tick drain, and shimmer phase. Happy paths well covered. Missing: particle color matching verification (PIECE_COLORS lookup correctness), tick behavior for Tetris flash overlay drain, and level-up tint suppression when Tetris flash is active (the guard at effects.ts line 357).",
+    "security": "Renderer-only change. No network I/O, no DOM manipulation, no user input processed. No new attack surface.",
+    "architectural_alignment": "effects.ts imports only from engine/ (types, board, rotation, pieces) and renderer/ (boardRenderer, postProcess) — no input/ or ui/ imports. postProcess.ts exports PostProcessController interface correctly. main.ts is the sole cross-layer wiring point. resizeScreen() hook properly called on resize. All layer boundaries respected."
+  },
+  "flags": [
+    "missing-test-particle-color-verification",
+    "missing-test-levelup-tetris-flash-suppression"
+  ]
+}

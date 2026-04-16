@@ -24,6 +24,7 @@ import { BoardRenderer } from './renderer/boardRenderer.js'
 import { PieceRenderer } from './renderer/pieceRenderer.js'
 import { EffectsRenderer } from './renderer/effects.js'
 import { attachPostProcess } from './renderer/postProcess.js'
+import type { PostProcessController } from './renderer/postProcess.js'
 
 // Input
 import { KeyboardInput } from './input/keyboard.js'
@@ -73,12 +74,13 @@ async function main(): Promise<void> {
   app.stage.addChild(modalContainer)
 
   // Attach post-processing (glow/bloom) to board and piece containers
-  attachPostProcess(boardContainer, pieceContainer, app)
+  const postProcessController: PostProcessController = attachPostProcess(boardContainer, pieceContainer, app)
 
   // Instantiate renderers, input handlers, HUD, PauseModal
   const boardRenderer = new BoardRenderer(boardContainer)
   const pieceRenderer = new PieceRenderer(pieceContainer)
   const effectsRenderer = new EffectsRenderer(effectsContainer)
+  effectsRenderer.setPostProcessController(postProcessController)
   const hud = new HUD(uiContainer)
   hud.setVisible(false)
   const pauseModal = new PauseModal(modalContainer)
@@ -142,6 +144,7 @@ async function main(): Promise<void> {
     boardRenderer.resize(cellSize, offsetX, offsetY)
     pieceRenderer.resize(cellSize, offsetX, offsetY)
     effectsRenderer.resize(cellSize, offsetX, offsetY)
+    effectsRenderer.resizeScreen(window.innerWidth, window.innerHeight)
     hud.resize(cellSize, offsetX)
     touchInput.resize(cellSize)
     pauseModal.resize(window.innerWidth, window.innerHeight)
@@ -395,6 +398,7 @@ async function main(): Promise<void> {
 
       // Advance engine
       const phaseBeforeUpdate = state.phase
+      const stateBeforeTick = state
       const result = updateGameState(state, allActions, LOGIC_TICK_MS)
       state = result.state
       renderState = state
@@ -413,7 +417,12 @@ async function main(): Promise<void> {
 
       // Pass events to effects renderer and audio layer
       if (result.events.length > 0) {
-        effectsRenderer.onEvents(result.events)
+        const enrichedEvents = result.events.map(e =>
+          e.type === 'piece-lock'
+            ? { ...e, payload: { piece: stateBeforeTick.activePiece } }
+            : e
+        )
+        effectsRenderer.onEvents(enrichedEvents)
         audioManager.onEvents(result.events)
       }
 
@@ -463,7 +472,8 @@ async function main(): Promise<void> {
     hud.update(renderState)
 
     // Advance effect animations (every render frame)
-    effectsRenderer.tick(delta)
+    effectsRenderer.tick(delta, renderState)
+    postProcessController.tick(delta)
 
     requestAnimationFrame(loop)
   }
