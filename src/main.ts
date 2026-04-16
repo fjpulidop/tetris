@@ -24,6 +24,7 @@ import { BoardRenderer } from './renderer/boardRenderer.js'
 import { PieceRenderer } from './renderer/pieceRenderer.js'
 import { EffectsRenderer } from './renderer/effects.js'
 import { attachPostProcess } from './renderer/postProcess.js'
+import type { PostProcessController } from './renderer/postProcess.js'
 
 // Input
 import { KeyboardInput } from './input/keyboard.js'
@@ -73,7 +74,7 @@ async function main(): Promise<void> {
   app.stage.addChild(modalContainer)
 
   // Attach post-processing (glow/bloom) to board and piece containers
-  attachPostProcess(boardContainer, pieceContainer, app)
+  const postProcessController: PostProcessController = attachPostProcess(boardContainer, pieceContainer, app)
 
   // Instantiate renderers, input handlers, HUD, PauseModal
   const boardRenderer = new BoardRenderer(boardContainer)
@@ -360,6 +361,31 @@ async function main(): Promise<void> {
     }, 50)
   }
 
+  /**
+   * Apply a screen-shake effect scaled by the chain explosion depth.
+   * Shakes the entire stage for a short duration then resets position.
+   */
+  function triggerChainShake(depth: number): void {
+    const magnitude = Math.min(depth * 3, 10)
+    if (magnitude === 0) return
+    const SHAKE_DURATION_MS = 200
+    const startTime = performance.now()
+    function shakeFrame(): void {
+      const elapsed = performance.now() - startTime
+      if (elapsed >= SHAKE_DURATION_MS) {
+        app.stage.x = 0
+        app.stage.y = 0
+        return
+      }
+      const progress = elapsed / SHAKE_DURATION_MS
+      const decay = 1 - progress
+      app.stage.x = (Math.random() - 0.5) * 2 * magnitude * decay
+      app.stage.y = (Math.random() - 0.5) * 2 * magnitude * decay
+      requestAnimationFrame(shakeFrame)
+    }
+    requestAnimationFrame(shakeFrame)
+  }
+
   // --- Fixed-timestep game loop ---
   let accumulator = 0
   let lastTime = performance.now()
@@ -415,6 +441,18 @@ async function main(): Promise<void> {
       if (result.events.length > 0) {
         effectsRenderer.onEvents(result.events)
         audioManager.onEvents(result.events)
+        for (const event of result.events) {
+          if (event.type === 'chain-explosion') {
+            const payload = event.payload as { depth: number } | undefined
+            if (payload) {
+              postProcessController.setChainDepth(payload.depth)
+              triggerChainShake(payload.depth)
+            }
+          }
+          if (event.type === 'chain-reset') {
+            postProcessController.setChainDepth(0)
+          }
+        }
       }
 
       accumulator -= LOGIC_TICK_MS

@@ -9,6 +9,7 @@ import type { GameState } from '../engine/gameState.js'
 import { PIECE_SHAPES } from '../engine/pieces.js'
 import { CELL_COLORS } from '../renderer/boardRenderer.js'
 import { PIECE_COLORS } from '../engine/pieces.js'
+import { chainMultiplier } from '../engine/chainBlast.js'
 
 const LABEL_COLOR = 0x8888cc
 const VALUE_COLOR = 0xffffff
@@ -33,6 +34,9 @@ export class HUD {
   private muteButton: Text
   private _onMuteToggle: ((muted: boolean) => void) | null = null
   private _muted = false
+  private chainLabel: Text
+  private chainValue: Text
+  private lastChainDepth = -1
 
   // Cached values for change detection
   private lastScore = -1
@@ -62,12 +66,21 @@ export class HUD {
     this.nextLabel = new Text({ text: 'NEXT', style: labelStyle })
     this.nextPreview = new Graphics()
 
+    const chainLabelStyle = new TextStyle({ fill: LABEL_COLOR, fontSize: 12, fontFamily: 'monospace' })
+    const chainValueStyle = new TextStyle({ fill: 0xffcc44, fontSize: 20, fontFamily: 'monospace', fontWeight: 'bold' })
+    this.chainLabel = new Text({ text: 'CHAIN', style: chainLabelStyle })
+    this.chainValue = new Text({ text: 'x1', style: chainValueStyle })
+    this.chainLabel.visible = false
+    this.chainValue.visible = false
+
     for (const elem of [
       this.scoreLabel, this.scoreValue,
       this.levelLabel, this.levelValue,
       this.linesLabel, this.linesValue,
       this.nextLabel,
       this.nextPreview,
+      this.chainLabel,
+      this.chainValue,
     ]) {
       this.container.addChild(elem)
     }
@@ -104,7 +117,7 @@ export class HUD {
 
     // Draw panel background
     this.panel.clear()
-    this.panel.roundRect(0, 0, HUD_PANEL_WIDTH, 320, 8)
+    this.panel.roundRect(0, 0, HUD_PANEL_WIDTH, 370, 8)
     this.panel.fill({ color: PANEL_BACKGROUND, alpha: 0.85 })
 
     let y = 12
@@ -133,6 +146,13 @@ export class HUD {
     this.linesValue.x = pad
     this.linesValue.y = y
     y += 36
+
+    this.chainLabel.x = pad
+    this.chainLabel.y = y
+    y += 18
+    this.chainValue.x = pad
+    this.chainValue.y = y
+    y += 28
 
     this.nextLabel.x = pad
     this.nextLabel.y = y
@@ -168,6 +188,17 @@ export class HUD {
     if (state.nextPiece !== this.lastNextPiece) {
       this.drawNextPiecePreview(state.nextPiece)
       this.lastNextPiece = state.nextPiece
+    }
+
+    if (state.chainDepth !== this.lastChainDepth) {
+      const isActive = state.chainDepth >= 1
+      this.chainLabel.visible = isActive
+      this.chainValue.visible = isActive
+      if (isActive) {
+        const mult = chainMultiplier(state.chainDepth)
+        this.chainValue.text = `x${mult}`
+      }
+      this.lastChainDepth = state.chainDepth
     }
 
     // Show game over overlay

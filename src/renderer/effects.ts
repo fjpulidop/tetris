@@ -43,6 +43,9 @@ export class EffectsRenderer {
   /** Active flash effects. */
   private activeFlashes: FlashEffect[]
 
+  /** Current chain explosion depth — used by callers to read the active chain level. */
+  private currentChainDepth = 0
+
   private cellSize = 0
   private offsetX = 0
   private offsetY = 0
@@ -95,6 +98,19 @@ export class EffectsRenderer {
           this.triggerLineClearEffects(payload.rows)
         }
       }
+      if (event.type === 'chain-explosion') {
+        const payload = event.payload as {
+          affectedArea: ReadonlyArray<[number, number]>
+          depth: number
+        } | undefined
+        if (payload) {
+          this.currentChainDepth = payload.depth
+          this.triggerExplosionEffect(payload.affectedArea, payload.depth)
+        }
+      }
+      if (event.type === 'chain-reset') {
+        this.currentChainDepth = 0
+      }
     }
   }
 
@@ -118,6 +134,49 @@ export class EffectsRenderer {
     this.container.addChild(g)
 
     this.activeFlashes.push({ graphics: g, life: FLASH_DURATION_MS })
+  }
+
+  /**
+   * Trigger an explosion visual effect for the given chain-blast affected area.
+   * Color varies with chain depth; particles spray outward from each cell.
+   */
+  private triggerExplosionEffect(
+    area: ReadonlyArray<[number, number]>,
+    depth: number
+  ): void {
+    const chainColor =
+      depth <= 1 ? 0x88ccff
+      : depth === 2 ? 0xffcc44
+      : 0xff4400
+
+    const rowsAffected = new Set<number>()
+
+    for (const [row, col] of area) {
+      rowsAffected.add(row)
+      const cx = (col + 0.5) * this.cellSize
+      const cy = (row + 0.5) * this.cellSize
+      let activated = 0
+
+      for (const particle of this.particlePool) {
+        if (activated >= 5) break
+        if (particle.sprite.visible) continue
+        particle.sprite.visible = true
+        particle.sprite.alpha = 1
+        particle.sprite.x = cx + (Math.random() - 0.5) * this.cellSize
+        particle.sprite.y = cy + (Math.random() - 0.5) * this.cellSize
+        particle.sprite.scale.set(Math.random() * 0.8 + 0.4)
+        particle.sprite.tint = chainColor
+        particle.vx = (Math.random() - 0.5) * depth * 4
+        particle.vy = -(Math.random() * 2 + 1) * depth
+        particle.life = PARTICLE_DURATION_MS
+        particle.maxLife = PARTICLE_DURATION_MS
+        activated++
+      }
+    }
+
+    for (const row of rowsAffected) {
+      this.triggerFlash(row)
+    }
   }
 
   private triggerParticles(row: number): void {
@@ -170,6 +229,7 @@ export class EffectsRenderer {
       particle.life -= dtMs
       if (particle.life <= 0) {
         particle.sprite.visible = false
+        particle.sprite.tint = 0xffffff
         continue
       }
 

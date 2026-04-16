@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createGameState, updateGameState } from '../../engine/gameState.js'
 import { GameAction } from '../../engine/types.js'
 import { setCell, BOARD_COLS, BOARD_ROWS } from '../../engine/board.js'
 import { getCells } from '../../engine/rotation.js'
+import { CHAIN_RESET_MS } from '../../engine/chainBlast.js'
 
 /**
  * Helper: create a state that is already in the 'playing' phase.
@@ -724,5 +725,158 @@ describe('updateGameState — multiple actions in one tick', () => {
       // MoveLeft decreases col by 1, then MoveRight increases by 1 = net 0
       expect(after.activePiece.col).toBe(originalCol)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Chain blast integration
+// ---------------------------------------------------------------------------
+
+describe('chain blast integration', () => {
+  beforeEach(() => {
+    vi.spyOn(Math, 'random')
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('createGameState initializes chargedCells as empty Set, chainDepth=0, chainTimer=0', () => {
+    const state = createGameState()
+    expect(state.chargedCells.size).toBe(0)
+    expect(state.chainDepth).toBe(0)
+    expect(state.chainTimer).toBe(0)
+  })
+
+  it('after line clear with random=0.5: chargedCells.size === 0', () => {
+    // Use random=0.5 so charge probability (0.2) is never met
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    let state = playingState()
+    let board = state.board
+    // Fill row 19 cols 0-8, leave col 9 empty
+    for (let col = 0; col < 9; col++) {
+      board = setCell(board, 19, col, 1)
+    }
+    // I-piece rotation 1 at col=7 fills col 9 (7+2=9) in rows 16-19; only row 19 is full
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 0, col: 7 }
+    state = { ...state, board, activePiece: iPiece }
+    const { state: after } = updateGameState(state, [GameAction.HardDrop], 16)
+    expect(after.chargedCells.size).toBe(0)
+  })
+
+  it('after line clear with random=0.1: chargedCells.size > 0', () => {
+    // Use random=0.1 so charge probability (0.2) is always met
+    vi.spyOn(Math, 'random').mockReturnValue(0.1)
+    let state = playingState()
+    let board = state.board
+    // Fill row 19 cols 0-8, leave col 9 empty
+    for (let col = 0; col < 9; col++) {
+      board = setCell(board, 19, col, 1)
+    }
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 0, col: 7 }
+    state = { ...state, board, activePiece: iPiece }
+    const { state: after } = updateGameState(state, [GameAction.HardDrop], 16)
+    expect(after.chargedCells.size).toBeGreaterThan(0)
+  })
+
+  it('when charged cell is in cleared row, resulting state has chainDepth === 1', () => {
+    // First clear: random=0.1 so charged cells are generated in row 18 (above cleared row 19)
+    vi.spyOn(Math, 'random').mockReturnValue(0.1)
+    // Set up a fresh state with a charged cell pre-populated in the row we're about to clear.
+    let state2 = playingState()
+    let board2 = state2.board
+    // Fill row 19 cols 0-8
+    for (let col = 0; col < 9; col++) {
+      board2 = setCell(board2, 19, col, 1)
+    }
+    // Pre-populate a charged cell at row 19, col 0 (flat idx = 19*10+0 = 190)
+    const chargedIdx = 19 * BOARD_COLS + 0
+    const preCharged = new Set<number>([chargedIdx])
+    const iPiece2 = { type: 'I' as const, rotation: 1 as const, row: 0, col: 7 }
+    state2 = { ...state2, board: board2, activePiece: iPiece2, chargedCells: preCharged, chainDepth: 0 }
+    const { state: afterSecond } = updateGameState(state2, [GameAction.HardDrop], 16)
+    // The charged cell at row 19 detonates → explosion → chainDepth becomes 1
+    expect(afterSecond.chainDepth).toBe(1)
+  })
+
+  it('two consecutive chain explosions yields chainDepth === 2', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.1)
+    let state = playingState()
+    let board = state.board
+
+    // Fill row 19 cols 0-8 to trigger 1-line clear
+    for (let col = 0; col < 9; col++) {
+      board = setCell(board, 19, col, 1)
+    }
+    // Place a charged cell at row 19, col 0 → detonates on this clear → chainDepth 1
+    const chargedIdx1 = 19 * BOARD_COLS + 0
+    const preCharged1 = new Set<number>([chargedIdx1])
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 0, col: 7 }
+    state = { ...state, board, activePiece: iPiece, chargedCells: preCharged1, chainDepth: 0 }
+    const { state: after1 } = updateGameState(state, [GameAction.HardDrop], 16)
+    expect(after1.chainDepth).toBe(1)
+
+    // Second clear: fill row 19 again and add a charged cell there, starting from chainDepth=1
+    let board2 = after1.board
+    for (let col = 0; col < 9; col++) {
+      board2 = setCell(board2, 19, col, 1)
+    }
+    const chargedIdx2 = 19 * BOARD_COLS + 0
+    const preCharged2 = new Set<number>([chargedIdx2, ...after1.chargedCells])
+    const iPiece2 = { type: 'I' as const, rotation: 1 as const, row: 0, col: 7 }
+    const state2 = {
+      ...after1,
+      board: board2,
+      activePiece: iPiece2,
+      chargedCells: preCharged2,
+    }
+    const { state: after2 } = updateGameState(state2, [GameAction.HardDrop], 16)
+    expect(after2.chainDepth).toBe(2)
+  })
+
+  it('score from 1-line clear at chainDepth=1 equals Math.round(100 * 1.5) = 150 at level 1', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5) // No new charges
+    let state = playingState()
+    let board = state.board
+    // Fill row 19 cols 0-8
+    for (let col = 0; col < 9; col++) {
+      board = setCell(board, 19, col, 1)
+    }
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 0, col: 7 }
+    // Start with chainDepth=1 and no charged cells (so no explosion occurs)
+    state = { ...state, board, activePiece: iPiece, score: 0, level: 1, chainDepth: 1 }
+    const { state: after } = updateGameState(state, [GameAction.HardDrop], 16)
+    // baseMultiplier = chainMultiplier(1) = 1.5; score = Math.round(100 * 1.5) = 150
+    expect(after.score).toBe(150)
+  })
+
+  it('after CHAIN_RESET_MS ms tick with no clears, chainDepth resets to 0', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const state = {
+      ...playingState(),
+      chainDepth: 2,
+      chainTimer: 0,
+    }
+    // Advance time past CHAIN_RESET_MS without any lock
+    const { state: after } = updateGameState(state, [], CHAIN_RESET_MS + 1)
+    expect(after.chainDepth).toBe(0)
+  })
+
+  it('paused state still has chargedCells, chainDepth, and chainTimer fields', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const preCharged = new Set<number>([5, 15, 25])
+    const state = {
+      ...playingState(),
+      chargedCells: preCharged,
+      chainDepth: 2,
+      chainTimer: 100,
+    }
+    const { state: paused } = updateGameState(state, [GameAction.Pause], 16)
+    expect(paused.chargedCells).toBeDefined()
+    expect(paused.chainDepth).toBeDefined()
+    expect(paused.chainTimer).toBeDefined()
+    expect(paused.chargedCells.size).toBe(3)
+    expect(paused.chainDepth).toBe(2)
+    expect(paused.chainTimer).toBe(100)
   })
 })

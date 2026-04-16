@@ -36,6 +36,10 @@ export class BoardRenderer {
   private cellGraphics: Graphics[]
   /** Cached board state for change detection. */
   private lastBoard: Uint8Array
+  /** Overlay graphics for charged-cell pulse effect. One per cell. */
+  private chargedOverlayGraphics: Graphics[]
+  /** Set of charged cell indices from the previous frame (for cleanup). */
+  private lastChargedCells: ReadonlySet<number> = new Set()
 
   private cellSize = 0
   private offsetX = 0
@@ -54,6 +58,15 @@ export class BoardRenderer {
       const g = new Graphics()
       this.container.addChild(g)
       this.cellGraphics.push(g)
+    }
+
+    // Pre-allocate charged overlay graphics (one per cell, initially invisible)
+    this.chargedOverlayGraphics = []
+    for (let i = 0; i < BOARD_ROWS * BOARD_COLS; i++) {
+      const g = new Graphics()
+      g.visible = false
+      this.container.addChild(g)
+      this.chargedOverlayGraphics.push(g)
     }
 
     // Initialize last board state as all zeros
@@ -81,6 +94,12 @@ export class BoardRenderer {
     // Mark as needs redraw by filling with an impossible value (-1 via 255 trick)
     // Actually just reset so all cells differ from current board state
     this.lastBoard.fill(255)
+
+    // Hide all charged overlays and reset tracking
+    for (const g of this.chargedOverlayGraphics) {
+      g.visible = false
+    }
+    this.lastChargedCells = new Set()
   }
 
   /** Draw static grid lines. Called only on resize. */
@@ -145,5 +164,47 @@ export class BoardRenderer {
 
     // Cache current board for next frame's change detection
     this.lastBoard = board.slice()
+
+    // Update charged cell overlay pulse
+    this.updateChargedOverlays(state, performance.now())
+  }
+
+  /**
+   * Draw a pulsing white overlay on each charged cell.
+   * Hides overlays for cells that were charged last frame but are no longer charged.
+   */
+  private updateChargedOverlays(state: GameState, now: number): void {
+    if (this.cellSize === 0) return
+    const pulse = 0.4 + 0.4 * Math.sin(now * 0.006)
+
+    for (const idx of state.chargedCells) {
+      if (idx < 0 || idx >= BOARD_ROWS * BOARD_COLS) continue
+      const g = this.chargedOverlayGraphics[idx]
+      if (!g) continue
+      const row = Math.floor(idx / BOARD_COLS)
+      const col = idx % BOARD_COLS
+      g.clear()
+      g.roundRect(
+        col * this.cellSize + 1,
+        row * this.cellSize + 1,
+        this.cellSize - 2,
+        this.cellSize - 2,
+        CELL_RADIUS
+      )
+      g.fill({ color: 0xffffff, alpha: pulse })
+      g.visible = true
+    }
+
+    for (const idx of this.lastChargedCells) {
+      if (!state.chargedCells.has(idx)) {
+        const g = this.chargedOverlayGraphics[idx]
+        if (g) {
+          g.visible = false
+          g.clear()
+        }
+      }
+    }
+
+    this.lastChargedCells = state.chargedCells
   }
 }
