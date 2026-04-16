@@ -31,9 +31,13 @@ import { TouchInput } from './input/touch.js'
 
 // UI
 import { HUD } from './ui/hud.js'
-import { SplashScreen } from './ui/splashScreen.js'
+import { MainMenu } from './ui/mainMenu.js'
+import { GameOverOverlay } from './ui/gameOverOverlay.js'
 import { PauseModal } from './ui/pauseModal.js'
 import { GameAction } from './engine/types.js'
+
+// Audio
+import { AudioManager } from './audio/audioManager.js'
 
 /** Fixed logic update rate (60 Hz). */
 const LOGIC_TICK_MS = 1000 / 60
@@ -56,7 +60,7 @@ async function main(): Promise<void> {
   const effectsContainer = new Container()
   const uiContainer = new Container()
   const touchContainer = new Container()
-  const splashContainer = new Container()
+  const mainMenuContainer = new Container()
   // modalContainer MUST be last so it renders above all other layers
   const modalContainer = new Container()
 
@@ -65,7 +69,7 @@ async function main(): Promise<void> {
   app.stage.addChild(effectsContainer)
   app.stage.addChild(uiContainer)
   app.stage.addChild(touchContainer)
-  app.stage.addChild(splashContainer)
+  app.stage.addChild(mainMenuContainer)
   app.stage.addChild(modalContainer)
 
   // Attach post-processing (glow/bloom) to board and piece containers
@@ -78,6 +82,15 @@ async function main(): Promise<void> {
   const hud = new HUD(uiContainer)
   hud.setVisible(false)
   const pauseModal = new PauseModal(modalContainer)
+  const audioManager = new AudioManager()
+
+  // Wire mute toggle: HUD button → AudioManager → HUD label sync
+  hud.setOnMuteToggle((muted: boolean) => {
+    audioManager.mute(muted)
+    hud.setMuted(muted)
+  })
+  hud.setMuted(audioManager.isMuted())
+
   const keyboard = new KeyboardInput()
   const touchInput = new TouchInput(touchContainer, 30)
 
@@ -107,6 +120,8 @@ async function main(): Promise<void> {
   const prePauseFilters = new Map<Container, Filter[] | null>()
   /** Teardown function returned by attachPauseKeyListener(). */
   let removePauseKeyListener: (() => void) | null = null
+  /** Teardown function for the Escape-key listener active during 'intro' phase. */
+  let removeIntroKeyListener: (() => void) | null = null
 
   // --- Responsive layout ---
   function computeLayout(): { cellSize: number; offsetX: number; offsetY: number } {
@@ -138,19 +153,17 @@ async function main(): Promise<void> {
     // Resize the PixiJS renderer to match window
     app.renderer.resize(window.innerWidth, window.innerHeight)
 
-    if (splashScreen !== null) {
-      splashScreen.resize(window.innerWidth, window.innerHeight)
-    }
+    mainMenu?.resize(window.innerWidth, window.innerHeight)
+    gameOverOverlay.resize(window.innerWidth, window.innerHeight)
   }
 
-  // Splash screen — rendered on top of everything; destroyed on first Start action
-  let splashScreen: SplashScreen | null = new SplashScreen(splashContainer, app)
-  const splashTapBuffer: GameAction[] = []
-  const onSplashTap = () => {
-    splashTapBuffer.push(GameAction.Start)
-    canvas.removeEventListener('pointerdown', onSplashTap)
-  }
-  canvas.addEventListener('pointerdown', onSplashTap)
+  // Main menu — rendered on top of everything; destroyed on first Start action
+  let mainMenu: MainMenu | null = new MainMenu(mainMenuContainer, app)
+  mainMenu.onExit = handleExit
+  removeIntroKeyListener = attachIntroKeyListener()
+
+  const gameOverOverlay = new GameOverOverlay(modalContainer)
+  gameOverOverlay.onReturnToMenu = () => navigateToTitle()
 
   // Resize listener
   window.addEventListener('resize', handleResize)
@@ -237,6 +250,24 @@ async function main(): Promise<void> {
     return () => window.removeEventListener('keydown', handler)
   }
 
+  /**
+   * Attach a keyboard listener that fires handleExit() when Escape is pressed
+   * while in the 'intro' phase (main menu visible).
+   *
+   * Returns a teardown function. The caller is responsible for invoking it
+   * exactly once when the intro phase ends.
+   */
+  function attachIntroKeyListener(): () => void {
+    const handler = (e: KeyboardEvent): void => {
+      if (e.code === 'Escape') {
+        e.preventDefault()
+        handleExit()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }
+
   // ---------------------------------------------------------------------------
   // Resume / navigate actions
   // ---------------------------------------------------------------------------
@@ -271,6 +302,8 @@ async function main(): Promise<void> {
    * The HUD remains visible. The splash screen is not recreated.
    */
   function restartGame(): void {
+    audioManager.onPhaseChange('intro')    // stop BGM and reset bgmSoundId
+    audioManager.onPhaseChange('playing')  // restart BGM from beginning
     removePauseBlur()
     pauseModal.hide()
 
@@ -288,36 +321,43 @@ async function main(): Promise<void> {
   }
 
   /**
-   * Navigate back to the title / intro screen, fully restoring the splash experience.
+   * Navigate back to the title / main menu screen.
    *
-   * Recreates the SplashScreen instance (destroyed on first intro→playing transition)
-   * and re-wires the canvas pointer listener for tap-to-start.
+   * Tears down the pause state, hides all overlays, resets engine state,
+   * and re-instantiates the MainMenu.
    */
   function navigateToTitle(): void {
-    const freshState = createGameState()
-    if (freshState.phase !== 'intro') {
-      window.location.reload()
-      return
-    }
-
+    audioManager.onPhaseChange('intro')
     removePauseBlur()
     pauseModal.hide()
+    gameOverOverlay.hide()
+
     if (removePauseKeyListener !== null) {
       removePauseKeyListener()
       removePauseKeyListener = null
     }
 
-    state = freshState
+    state = createGameState()
     prevPhase = state.phase
 
-    splashScreen = new SplashScreen(splashContainer, app)
-    splashScreen.resize(window.innerWidth, window.innerHeight)
-
-    splashTapBuffer.splice(0)
-    // canvas is guaranteed non-null: main() throws before reaching this point otherwise
-    canvas!.addEventListener('pointerdown', onSplashTap)
+    mainMenu = new MainMenu(mainMenuContainer, app)
+    mainMenu.onExit = handleExit
+    mainMenu.resize(window.innerWidth, window.innerHeight)
+    removeIntroKeyListener = attachIntroKeyListener()
 
     hud.setVisible(false)
+  }
+
+  /**
+   * Handle the Exit button action:
+   * 1. Attempt window.close() (may be blocked by browser).
+   * 2. After 50ms, if the window is still open, show the fallback message.
+   */
+  function handleExit(): void {
+    window.close()
+    setTimeout(() => {
+      mainMenu?.showExitFallback()
+    }, 50)
   }
 
   // --- Fixed-timestep game loop ---
@@ -338,7 +378,7 @@ async function main(): Promise<void> {
       const bufferedActions = [
         ...keyboard.flush(),
         ...touchInput.flush(),
-        ...splashTapBuffer.splice(0),
+        ...(mainMenu?.flushActions() ?? []),
       ]
       const heldActions = [
         ...keyboard.getHeldActions(LOGIC_TICK_MS),
@@ -348,22 +388,33 @@ async function main(): Promise<void> {
       // Deduplicate: combine buffered + held, remove duplicates
       const allActions = deduplicateActions([...bufferedActions, ...heldActions])
 
+      // Notify audio layer of player actions (before engine processes them)
+      for (const action of allActions) {
+        audioManager.onAction(action)
+      }
+
       // Advance engine
       const phaseBeforeUpdate = state.phase
       const result = updateGameState(state, allActions, LOGIC_TICK_MS)
       state = result.state
       renderState = state
 
-      // Detect intro → playing transition: destroy splash and reveal HUD
+      // Detect intro → playing transition: destroy main menu and reveal HUD
       if (phaseBeforeUpdate === 'intro' && state.phase === 'playing') {
-        splashScreen?.destroy()
-        splashScreen = null
+        audioManager.onPhaseChange('playing')
+        mainMenu?.destroy()
+        mainMenu = null
+        if (removeIntroKeyListener !== null) {
+          removeIntroKeyListener()
+          removeIntroKeyListener = null
+        }
         hud.setVisible(true)
       }
 
-      // Pass events to effects renderer
+      // Pass events to effects renderer and audio layer
       if (result.events.length > 0) {
         effectsRenderer.onEvents(result.events)
+        audioManager.onEvents(result.events)
       }
 
       accumulator -= LOGIC_TICK_MS
@@ -375,6 +426,7 @@ async function main(): Promise<void> {
     const justResumed = prevPhase === 'paused' && currentPhase !== 'paused'
 
     if (justPaused) {
+      audioManager.onPhaseChange('paused')
       // Game just transitioned into pause — show blur and modal
       pauseSelectedIndex = 0
       applyPauseBlur()
@@ -386,6 +438,7 @@ async function main(): Promise<void> {
     }
 
     if (justResumed) {
+      audioManager.onPhaseChange('playing')
       // Engine resumed externally (e.g. by pressing Escape in normal keyboard flow)
       // Perform cleanup in case the modal/blur are still active
       removePauseBlur()
@@ -394,6 +447,12 @@ async function main(): Promise<void> {
         removePauseKeyListener()
         removePauseKeyListener = null
       }
+    }
+
+    const justGameOver = prevPhase !== 'gameover' && currentPhase === 'gameover'
+
+    if (justGameOver) {
+      gameOverOverlay.show(state.score, state.lines)
     }
 
     prevPhase = currentPhase

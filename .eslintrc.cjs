@@ -86,6 +86,39 @@ module.exports = {
         ],
       },
     },
+    // audio/ must not import from renderer/, input/, or ui/
+    // engine/ sub-modules are restricted; engine/types.ts is allowed
+    {
+      files: ['src/audio/**/*.ts'],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            patterns: [
+              {
+                group: ['*/renderer/*', '../renderer/*', '../../renderer/*', '@renderer*'],
+                message: 'audio/ must not import from renderer/',
+              },
+              {
+                group: ['*/input/*', '../input/*', '../../input/*', '@input*'],
+                message: 'audio/ must not import from input/',
+              },
+              {
+                group: ['*/ui/*', '../ui/*', '../../ui/*', '@ui*'],
+                message: 'audio/ must not import from ui/',
+              },
+              {
+                group: [
+                  '../engine/gameState*', '../engine/board*', '../engine/pieces*',
+                  '../engine/rotation*', '../engine/gravity*', '../engine/lineClear*',
+                ],
+                message: 'audio/ may only import from engine/types.ts, not other engine modules',
+              },
+            ],
+          },
+        ],
+      },
+    },
   ],
   env: {
     browser: true,
