@@ -25,6 +25,9 @@ export enum GameAction {
   Start = 'Start',
 }
 
+/** Rendering mode selected by the player at the main menu. */
+export type GameMode = 'classic' | 'monochrome'
+
 /** Types of events the engine can emit during a tick. */
 export type GameEventType =
   | 'line-clear'

@@ -6,7 +6,7 @@
  * same outputs (no side effects, no module-level mutable state).
  */
 
-import type { PieceType, Rotation, GameEvent } from './types.js'
+import type { PieceType, Rotation, GameEvent, GameMode } from './types.js'
 import { GameAction } from './types.js'
 import { BOARD_COLS, BOARD_ROWS, emptyBoard, setCell, isCollision } from './board.js'
 import type { Board } from './board.js'
@@ -47,6 +47,8 @@ export interface GameState {
   chainDepth: number
   /** Milliseconds elapsed since the last piece lock (used for decay/reset timers). */
   chainTimer: number
+  /** Rendering mode selected at game start. 'classic' renders Guideline colors; 'monochrome' renders grayscale. */
+  gameMode: GameMode
 }
 
 /**
@@ -123,7 +125,7 @@ function scoreForLines(count: number, level: number): number {
 /**
  * Create the initial game state. Spawns the first active piece immediately.
  */
-export function createGameState(): GameState {
+export function createGameState(mode: GameMode = 'classic'): GameState {
   // Start the bag and draw the first two pieces
   const initialBag = shuffleBag(ALL_PIECE_TYPES)
   const { type: firstType, bag: bag1 } = drawFromBag(initialBag)
@@ -144,6 +146,7 @@ export function createGameState(): GameState {
     chargedCells: new Set<number>(),
     chainDepth: 0,
     chainTimer: 0,
+    gameMode: mode,
   }
 }
 

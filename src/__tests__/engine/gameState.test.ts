@@ -880,3 +880,30 @@ describe('chain blast integration', () => {
     expect(paused.chainTimer).toBe(100)
   })
 })
+
+describe('createGameState — gameMode field', () => {
+  it('defaults to "classic" when no argument is passed', () => {
+    const state = createGameState()
+    expect(state.gameMode).toBe('classic')
+  })
+
+  it('stores "monochrome" when passed as argument', () => {
+    const state = createGameState('monochrome')
+    expect(state.gameMode).toBe('monochrome')
+  })
+
+  it('preserves gameMode through updateGameState ticks', () => {
+    const s = createGameState('monochrome')
+    const { state: playing } = updateGameState(s, [GameAction.Start], 0)
+    const { state: after } = updateGameState(playing, [], 16)
+    expect(after.gameMode).toBe('monochrome')
+  })
+
+  it('preserves gameMode through pause/resume cycle', () => {
+    const s = createGameState('monochrome')
+    const { state: playing } = updateGameState(s, [GameAction.Start], 0)
+    const { state: paused } = updateGameState(playing, [GameAction.Pause], 16)
+    const { state: resumed } = updateGameState(paused, [GameAction.Pause], 16)
+    expect(resumed.gameMode).toBe('monochrome')
+  })
+})

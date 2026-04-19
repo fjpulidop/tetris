@@ -8,6 +8,7 @@
 import { Container, Graphics } from 'pixi.js'
 import { BOARD_COLS, BOARD_ROWS } from '../engine/board.js'
 import type { GameState } from '../engine/gameState.js'
+import type { GameMode } from '../engine/types.js'
 
 /** Hex colors for each piece color index (1–7). Index 0 = empty (not drawn). */
 export const CELL_COLORS: Record<number, number> = {
@@ -20,6 +21,9 @@ export const CELL_COLORS: Record<number, number> = {
   7: 0xf0a000, // L — orange
 }
 
+/** Locked-cell color in monochrome mode. */
+const MONO_LOCKED_COLOR = 0x888888
+
 /** Background color for empty cells. */
 const EMPTY_CELL_COLOR = 0x1a1a2e
 
@@ -28,6 +32,15 @@ const GRID_LINE_COLOR = 0x2a2a4e
 
 /** Corner radius for cell rectangles. */
 const CELL_RADIUS = 2
+
+/**
+ * Resolve the fill color for a locked board cell.
+ * In monochrome mode all color indices map to MONO_LOCKED_COLOR.
+ */
+function resolveCellColor(colorIndex: number, gameMode: GameMode): number {
+  if (gameMode === 'monochrome') return MONO_LOCKED_COLOR
+  return CELL_COLORS[colorIndex] ?? 0xffffff
+}
 
 export class BoardRenderer {
   private container: Container
@@ -150,7 +163,7 @@ export class BoardRenderer {
         g.clear()
 
         if (value !== 0) {
-          const color = CELL_COLORS[value] ?? 0xffffff
+          const color = resolveCellColor(value, state.gameMode)
           const x = col * this.cellSize + 1
           const y = row * this.cellSize + 1
           const size = this.cellSize - 2

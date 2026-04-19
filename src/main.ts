@@ -36,6 +36,7 @@ import { MainMenu } from './ui/mainMenu.js'
 import { GameOverOverlay } from './ui/gameOverOverlay.js'
 import { PauseModal } from './ui/pauseModal.js'
 import { GameAction } from './engine/types.js'
+import type { GameMode } from './engine/types.js'
 
 // Audio
 import { AudioManager } from './audio/audioManager.js'
@@ -112,6 +113,8 @@ async function main(): Promise<void> {
   // --- Loop-level pause state ---
   /** Phase observed on the previous loop iteration (edge-detection). */
   let prevPhase = state.phase
+  /** Mode selected from the main menu; applied to createGameState() when the Start action arrives. */
+  let pendingMode: GameMode = 'classic'
   /** Which option is highlighted in the pause modal. */
   let pauseSelectedIndex = 0
   /**
@@ -338,6 +341,7 @@ async function main(): Promise<void> {
       removePauseKeyListener = null
     }
 
+    // createGameState() defaults to 'classic'; mode choice is not persisted across sessions.
     state = createGameState()
     prevPhase = state.phase
 
@@ -410,6 +414,19 @@ async function main(): Promise<void> {
         ...keyboard.getHeldActions(LOGIC_TICK_MS),
         ...touchInput.getHeldActions(LOGIC_TICK_MS),
       ]
+
+      // Capture mode selection from main menu (null if player clicked PLAY or no click yet)
+      const selectedMode = mainMenu?.flushMode() ?? null
+      if (selectedMode !== null) {
+        pendingMode = selectedMode
+      }
+
+      // If a Start action arrived while in intro, reinitialize state with the chosen mode
+      // so that state.gameMode is set before the engine transitions intro → playing.
+      if (state.phase === 'intro' && bufferedActions.includes(GameAction.Start)) {
+        state = createGameState(pendingMode)
+        pendingMode = 'classic' // reset for next game (mode is not persisted)
+      }
 
       // Deduplicate: combine buffered + held, remove duplicates
       const allActions = deduplicateActions([...bufferedActions, ...heldActions])

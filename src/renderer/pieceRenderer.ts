@@ -12,12 +12,36 @@ import { getCells } from '../engine/rotation.js'
 import type { ActivePiece } from '../engine/rotation.js'
 import { PIECE_COLORS } from '../engine/pieces.js'
 import { CELL_COLORS } from './boardRenderer.js'
+import type { GameMode } from '../engine/types.js'
 
 /** Corner radius for piece cells (matches board renderer). */
 const CELL_RADIUS = 2
 
 /** Alpha for ghost piece. */
 const GHOST_ALPHA = 0.3
+
+/** Active piece color in monochrome mode. */
+const MONO_ACTIVE_COLOR = 0xeeeeee
+/** Ghost piece color in monochrome mode. */
+const MONO_GHOST_COLOR = 0x555555
+
+/**
+ * Resolve the active piece fill color.
+ * In monochrome mode all piece types render as MONO_ACTIVE_COLOR.
+ */
+function resolveActiveColor(colorIndex: number, gameMode: GameMode): number {
+  if (gameMode === 'monochrome') return MONO_ACTIVE_COLOR
+  return CELL_COLORS[colorIndex] ?? 0xffffff
+}
+
+/**
+ * Resolve the ghost piece fill color.
+ * In monochrome mode the ghost uses MONO_GHOST_COLOR (distinct from active).
+ * In classic mode the ghost inherits the active piece color.
+ */
+function resolveGhostColor(gameMode: GameMode, classicColor: number): number {
+  return gameMode === 'monochrome' ? MONO_GHOST_COLOR : classicColor
+}
 
 export class PieceRenderer {
   private container: Container
@@ -73,7 +97,8 @@ export class PieceRenderer {
     }
 
     const colorIndex = PIECE_COLORS[piece.type]
-    const color = CELL_COLORS[colorIndex] ?? 0xffffff
+    const color = resolveActiveColor(colorIndex, state.gameMode)
+    const ghostColor = resolveGhostColor(state.gameMode, color)
 
     // Compute ghost position
     const ghostPiece = this.computeGhost(state.board, piece)
@@ -98,7 +123,7 @@ export class PieceRenderer {
         const y = row * this.cellSize + 1
         const size = this.cellSize - 2
         g.roundRect(x, y, size, size, CELL_RADIUS)
-        g.fill({ color, alpha: 1 })
+        g.fill({ color: ghostColor, alpha: 1 })
       }
     }
 
