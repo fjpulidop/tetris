@@ -240,8 +240,8 @@ describe('MainMenu — onExit callback', () => {
 
     const menuContainer = stage.children[0]!
     const interactives = collectInteractives(menuContainer)
-    // Exit button is index 1 in depth-first traversal
-    interactives[1]?.emit('pointerup')
+    // Exit button is index 2 in depth-first traversal (after PLAY and MONOCHROME)
+    interactives[2]?.emit('pointerup')
 
     expect(callback).toHaveBeenCalledTimes(1)
   })
@@ -304,6 +304,22 @@ describe('MainMenu — resize', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Button-by-label helper (used by MONOCHROME button tests)
+// ---------------------------------------------------------------------------
+
+function getButtonByLabel(menu: MainMenu, label: string): FakeContainer {
+  // Interactive buttons are containers with eventMode === 'static'
+  // and a text child whose text matches the label.
+  const menuContainer = (menu as unknown as { container: FakeContainer }).container
+  const interactive = collectInteractives(menuContainer)
+  for (const btn of interactive) {
+    const textChild = btn.children.find((c: FakeContainer) => c.text === label)
+    if (textChild) return btn
+  }
+  throw new Error(`Button with label "${label}" not found`)
+}
+
 describe('MainMenu — destroy', () => {
   it('destroy() does not throw', () => {
     const stage = makeStage()
@@ -329,5 +345,52 @@ describe('MainMenu — destroy', () => {
     const menu = new MainMenu(stage as never, app as never)
     menu.showExitFallback() // arms the 3-second timer
     expect(() => menu.destroy()).not.toThrow()
+  })
+})
+
+describe('MONOCHROME button', () => {
+  let stage: FakeContainer
+  let app: FakeApp
+  let menu: MainMenu
+
+  beforeEach(() => {
+    stage = makeStage()
+    app = makeApp()
+    menu = new MainMenu(stage as never, app as never)
+  })
+
+  it('renders a third interactive button (PLAY, MONOCHROME, EXIT)', () => {
+    const menuContainer = stage.children[0]!
+    const interactiveChildren = collectInteractives(menuContainer)
+    expect(interactiveChildren.length).toBe(3) // play, monochrome, exit
+  })
+
+  it('flushMode() returns null before any interaction', () => {
+    expect(menu.flushMode()).toBeNull()
+  })
+
+  it('clicking MONOCHROME enqueues GameAction.Start in flushActions()', () => {
+    const monoBtn = getButtonByLabel(menu, 'MONOCHROME')
+    monoBtn.emit('pointerup')
+    expect(menu.flushActions()).toContain(GameAction.Start)
+  })
+
+  it('clicking MONOCHROME enqueues "monochrome" in flushMode()', () => {
+    const monoBtn = getButtonByLabel(menu, 'MONOCHROME')
+    monoBtn.emit('pointerup')
+    expect(menu.flushMode()).toBe('monochrome')
+  })
+
+  it('clicking PLAY leaves flushMode() returning null', () => {
+    const playBtn = getButtonByLabel(menu, 'PLAY')
+    playBtn.emit('pointerup')
+    expect(menu.flushMode()).toBeNull()
+  })
+
+  it('flushMode() returns null after draining', () => {
+    const monoBtn = getButtonByLabel(menu, 'MONOCHROME')
+    monoBtn.emit('pointerup')
+    menu.flushMode() // drain
+    expect(menu.flushMode()).toBeNull()
   })
 })

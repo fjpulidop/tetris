@@ -14,6 +14,7 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js'
 import type { Application, Filter, Ticker } from 'pixi.js'
 import { GlowFilter } from '@pixi/filter-glow'
 import { GameAction } from '../engine/types.js'
+import type { GameMode } from '../engine/types.js'
 
 /** The display title shown on the main menu. */
 const GAME_TITLE = 'BLOCK DROP'
@@ -31,9 +32,11 @@ export class MainMenu {
   private container: Container
   private titleText: Text
   private playButton: Container
+  private monochromeButton: Container
   private exitButton: Container
   private fallbackText: Text
   private menuActionBuffer: GameAction[] = []
+  private menuModeBuffer: GameMode[] = []
   private ticker: Ticker
   private _elapsed = 0
   private _fallbackTimer: ReturnType<typeof setTimeout> | null = null
@@ -80,6 +83,14 @@ export class MainMenu {
       this.menuActionBuffer.push(GameAction.Start)
     })
     this.container.addChild(this.playButton)
+
+    // Monochrome button — pushes Start + records 'monochrome' mode
+    this.monochromeButton = this.buildButton('MONOCHROME')
+    this.monochromeButton.on('pointerup', () => {
+      this.menuActionBuffer.push(GameAction.Start)
+      this.menuModeBuffer.push('monochrome')
+    })
+    this.container.addChild(this.monochromeButton)
 
     // Exit button — invokes the onExit callback
     this.exitButton = this.buildButton('EXIT')
@@ -153,6 +164,16 @@ export class MainMenu {
   }
 
   /**
+   * Drain and return the queued game mode selection, or null if none is pending.
+   * Returns null when the player clicked PLAY (Classic is the default).
+   * Returns 'monochrome' when the player clicked MONOCHROME.
+   */
+  flushMode(): GameMode | null {
+    const mode = this.menuModeBuffer.shift()
+    return mode ?? null
+  }
+
+  /**
    * Reposition and resize all child elements to match the current viewport.
    * Should be called from main.ts handleResize().
    */
@@ -182,11 +203,12 @@ export class MainMenu {
     }
 
     resizeButton(this.playButton, width / 2, height * 0.56)
-    resizeButton(this.exitButton, width / 2, height * 0.56 + 70)
+    resizeButton(this.monochromeButton, width / 2, height * 0.56 + 70)
+    resizeButton(this.exitButton, width / 2, height * 0.56 + 140)
 
     // Position fallback message below buttons
     this.fallbackText.x = width / 2
-    this.fallbackText.y = height * 0.56 + 150
+    this.fallbackText.y = height * 0.56 + 220
   }
 
   /**
