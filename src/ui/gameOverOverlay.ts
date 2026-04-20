@@ -7,13 +7,15 @@
  * Lifecycle (matches PauseModal pattern):
  *   - Construction does NOT add anything to the stage (hidden by default).
  *   - show(score, lines) adds panelRoot to stage and updates score text.
+ *   - showSprint(finalTimeMs, isNewPB) adds panelRoot with Sprint results.
  *   - hide() removes panelRoot from stage.
  *   - Both show() and hide() are idempotent.
  *
- * Layer boundary: imports from pixi.js only.
+ * Layer boundary: imports from pixi.js and ../engine/persistence.js only.
  */
 
 import { Container, Graphics, Text, TextStyle } from 'pixi.js'
+import { formatSprintTime } from '../engine/persistence.js'
 
 const COLOR_TITLE = 0xffffff
 const COLOR_SCORE = 0xaaaaff
@@ -33,6 +35,8 @@ export class GameOverOverlay {
   private titleText: Text
   private scoreText: Text
   private returnButton: Container
+  private pbText: Text
+  private _sprintMode = false
   /** Whether panelRoot is currently attached to the stage. */
   private visible = false
 
@@ -73,6 +77,18 @@ export class GameOverOverlay {
       this.onReturnToMenu()
     })
     this.panelRoot.addChild(this.returnButton)
+
+    // "New Best!" indicator — shown only when a Sprint PB is set
+    const pbStyle = new TextStyle({
+      fontSize: 28,
+      fontWeight: 'bold',
+      fill: 0xffdd44,
+      fontFamily: FONT_FAMILY,
+    })
+    this.pbText = new Text({ text: 'New Best!', style: pbStyle })
+    this.pbText.anchor.set(0.5, 0)
+    this.pbText.visible = false
+    this.panelRoot.addChild(this.pbText)
   }
 
   // ---------------------------------------------------------------------------
@@ -122,6 +138,21 @@ export class GameOverOverlay {
   }
 
   /**
+   * Show the overlay in Sprint mode with the final time and optional PB indicator.
+   * Idempotent: calling showSprint() when already visible updates text each time.
+   */
+  showSprint(finalTimeMs: number, isNewPB: boolean): void {
+    this.titleText.text = 'SPRINT COMPLETE'
+    this.scoreText.text = formatSprintTime(finalTimeMs)
+    this.pbText.visible = isNewPB
+    this._sprintMode = true
+    if (!this.visible) {
+      this.stage.addChild(this.panelRoot)
+      this.visible = true
+    }
+  }
+
+  /**
    * Remove the overlay from the stage.
    * Idempotent: safe to call when already hidden.
    */
@@ -129,6 +160,9 @@ export class GameOverOverlay {
     if (this.visible) {
       this.stage.removeChild(this.panelRoot)
       this.visible = false
+      this.titleText.text = 'GAME OVER'   // reset for next Marathon use
+      this._sprintMode = false
+      this.pbText.visible = false
     }
   }
 
@@ -152,6 +186,10 @@ export class GameOverOverlay {
     // Position score text
     this.scoreText.x = w / 2
     this.scoreText.y = h * 0.45
+
+    // pbText sits between scoreText and returnButton
+    this.pbText.x = w / 2
+    this.pbText.y = h * 0.53
 
     // Redraw return button pill and reposition
     const bg = this.returnButton.children[0] as Graphics

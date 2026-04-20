@@ -49,6 +49,14 @@ export interface GameState {
   chainTimer: number
   /** Rendering mode selected at game start. 'classic' renders Guideline colors; 'monochrome' renders grayscale. */
   gameMode: GameMode
+  /** Which play mode is active for this game. */
+  playMode: 'marathon' | 'sprint'
+  /**
+   * True once the first piece has been locked in a Sprint run.
+   * main.ts uses the false→true edge to start the wall-clock timer.
+   * Always false in Marathon; irrelevant after the first lock in Sprint.
+   */
+  timerStarted: boolean
 }
 
 /**
@@ -125,7 +133,10 @@ function scoreForLines(count: number, level: number): number {
 /**
  * Create the initial game state. Spawns the first active piece immediately.
  */
-export function createGameState(mode: GameMode = 'classic'): GameState {
+export function createGameState(
+  gameMode: GameMode = 'classic',
+  playMode: 'marathon' | 'sprint' = 'marathon'
+): GameState {
   // Start the bag and draw the first two pieces
   const initialBag = shuffleBag(ALL_PIECE_TYPES)
   const { type: firstType, bag: bag1 } = drawFromBag(initialBag)
@@ -146,7 +157,9 @@ export function createGameState(mode: GameMode = 'classic'): GameState {
     chargedCells: new Set<number>(),
     chainDepth: 0,
     chainTimer: 0,
-    gameMode: mode,
+    gameMode,
+    playMode,
+    timerStarted: false,
   }
 }
 
@@ -160,7 +173,11 @@ interface LockResult {
   chainDepth: number
   chainTimer: number
   events: GameEvent[]
+  /** True iff playMode=sprint and lines reached SPRINT_TARGET after this lock. */
+  sprintComplete: boolean
 }
+
+const SPRINT_TARGET = 40
 
 /**
  * Handle all post-lock processing: line detection, scoring, chain explosions,
@@ -180,7 +197,8 @@ function processLock(
   chargedCells: ReadonlySet<number>,
   chainDepth: number,
   chainTimer: number,
-  piece: ActivePiece
+  piece: ActivePiece,
+  playMode: 'marathon' | 'sprint'
 ): LockResult {
   const events: GameEvent[] = []
 
@@ -253,6 +271,23 @@ function processLock(
       currentCharged = new Set([...currentCharged, ...newChargedFlat])
     }
 
+    // Sprint completion check — applied after all line counting (including explosion bonus)
+    if (playMode === 'sprint' && currentLines >= SPRINT_TARGET) {
+      currentLines = SPRINT_TARGET   // cap; never emit "41 lines"
+      events.push({ type: 'sprint-complete' })
+      return {
+        board: currentBoard,
+        score: currentScore,
+        lines: currentLines,
+        level: currentLevel,
+        chargedCells: currentCharged,
+        chainDepth: currentChainDepth,
+        chainTimer: currentChainTimer,
+        events,
+        sprintComplete: true,
+      }
+    }
+
     if (newChargedFlat.length > 0) {
       events.push({ type: 'cell-charged' })
     }
@@ -274,6 +309,7 @@ function processLock(
     chainDepth: currentChainDepth,
     chainTimer: currentChainTimer,
     events,
+    sprintComplete: false,
   }
 }
 
@@ -395,7 +431,8 @@ export function updateGameState(
       chargedCells,
       chainDepth,
       chainTimer,
-      piece
+      piece,
+      state.playMode
     )
 
     board = lockResult.board
@@ -407,12 +444,43 @@ export function updateGameState(
     chainTimer = lockResult.chainTimer
     events.push(...lockResult.events)
 
+    const newTimerStarted =
+      state.playMode === 'sprint' && !state.timerStarted
+        ? true
+        : state.timerStarted
+
     // Apply decay tick
     const decay = tickChargeDecay(chargedCells, chainDepth, chainTimer, dtMs)
     chargedCells = decay.chargedCells
     chainDepth = decay.chainDepth
     chainTimer = decay.chainTimer
     if (decay.emitChainReset) events.push({ type: 'chain-reset' })
+
+    // Sprint complete — skip spawn and transition to gameover
+    if (lockResult.sprintComplete) {
+      events.push({ type: 'game-over' })
+      return {
+        state: {
+          ...state,
+          board: lockResult.board,
+          activePiece: null,
+          nextPiece: state.nextPiece,
+          score: lockResult.score,
+          level: lockResult.level,
+          lines: lockResult.lines,
+          phase: 'gameover',
+          gravityState: initialGravityState(),
+          pieceBag: state.pieceBag,
+          chargedCells: lockResult.chargedCells,
+          chainDepth: lockResult.chainDepth,
+          chainTimer: lockResult.chainTimer,
+          gameMode: state.gameMode,
+          playMode: state.playMode,
+          timerStarted: newTimerStarted,
+        },
+        events,
+      }
+    }
 
     // Spawn next piece
     const draw = drawFromBag(pieceBag)
@@ -439,6 +507,9 @@ export function updateGameState(
           chargedCells,
           chainDepth,
           chainTimer,
+          gameMode: state.gameMode,
+          playMode: state.playMode,
+          timerStarted: newTimerStarted,
         },
         events,
       }
@@ -459,6 +530,9 @@ export function updateGameState(
         chargedCells,
         chainDepth,
         chainTimer,
+        gameMode: state.gameMode,
+        playMode: state.playMode,
+        timerStarted: newTimerStarted,
       },
       events,
     }
@@ -480,7 +554,8 @@ export function updateGameState(
       chargedCells,
       chainDepth,
       chainTimer,
-      piece
+      piece,
+      state.playMode
     )
 
     board = lockResult.board
@@ -492,12 +567,43 @@ export function updateGameState(
     chainTimer = lockResult.chainTimer
     events.push(...lockResult.events)
 
+    const newTimerStarted =
+      state.playMode === 'sprint' && !state.timerStarted
+        ? true
+        : state.timerStarted
+
     // Apply decay tick
     const decay = tickChargeDecay(chargedCells, chainDepth, chainTimer, dtMs)
     chargedCells = decay.chargedCells
     chainDepth = decay.chainDepth
     chainTimer = decay.chainTimer
     if (decay.emitChainReset) events.push({ type: 'chain-reset' })
+
+    // Sprint complete — skip spawn and transition to gameover
+    if (lockResult.sprintComplete) {
+      events.push({ type: 'game-over' })
+      return {
+        state: {
+          ...state,
+          board: lockResult.board,
+          activePiece: null,
+          nextPiece: state.nextPiece,
+          score: lockResult.score,
+          level: lockResult.level,
+          lines: lockResult.lines,
+          phase: 'gameover',
+          gravityState: initialGravityState(),
+          pieceBag: state.pieceBag,
+          chargedCells: lockResult.chargedCells,
+          chainDepth: lockResult.chainDepth,
+          chainTimer: lockResult.chainTimer,
+          gameMode: state.gameMode,
+          playMode: state.playMode,
+          timerStarted: newTimerStarted,
+        },
+        events,
+      }
+    }
 
     // Spawn next piece
     const draw = drawFromBag(pieceBag)
@@ -524,6 +630,9 @@ export function updateGameState(
           chargedCells,
           chainDepth,
           chainTimer,
+          gameMode: state.gameMode,
+          playMode: state.playMode,
+          timerStarted: newTimerStarted,
         },
         events,
       }
@@ -544,6 +653,9 @@ export function updateGameState(
         chargedCells,
         chainDepth,
         chainTimer,
+        gameMode: state.gameMode,
+        playMode: state.playMode,
+        timerStarted: newTimerStarted,
       },
       events,
     }
@@ -570,6 +682,9 @@ export function updateGameState(
       chargedCells,
       chainDepth,
       chainTimer,
+      gameMode: state.gameMode,
+      playMode: state.playMode,
+      timerStarted: state.timerStarted,
     },
     events,
   }

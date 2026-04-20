@@ -37,6 +37,7 @@ export type GameEventType =
   | 'cell-charged'
   | 'chain-explosion'
   | 'chain-reset'
+  | 'sprint-complete'
 
 /** An event emitted by the engine. Payload is event-specific. */
 export interface GameEvent {

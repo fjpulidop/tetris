@@ -10,6 +10,7 @@ import { PIECE_SHAPES } from '../engine/pieces.js'
 import { CELL_COLORS } from '../renderer/boardRenderer.js'
 import { PIECE_COLORS } from '../engine/pieces.js'
 import { chainMultiplier } from '../engine/chainBlast.js'
+import { formatSprintTime } from '../engine/persistence.js'
 
 const LABEL_COLOR = 0x8888cc
 const VALUE_COLOR = 0xffffff
@@ -37,6 +38,16 @@ export class HUD {
   private chainLabel: Text
   private chainValue: Text
   private lastChainDepth = -1
+
+  // Sprint-mode panel
+  private sprintPanel: Container
+  private sprintLinesLabel: Text
+  private sprintLinesValue: Text
+  private sprintTimerLabel: Text
+  private sprintTimerValue: Text
+  private lastSprintLines = -1
+  private lastSprintTimerMs = -1
+  private currentPlayMode: 'marathon' | 'sprint' = 'marathon'
 
   // Cached values for change detection
   private lastScore = -1
@@ -95,6 +106,26 @@ export class HUD {
       this._onMuteToggle?.(this._muted)
     })
     this.container.addChild(this.muteButton)
+
+    // Sprint panel — hidden by default, shown when playMode === 'sprint'
+    this.sprintPanel = new Container()
+    this.sprintPanel.visible = false
+
+    const sprintLabelStyle = new TextStyle({ fill: LABEL_COLOR, fontSize: 12, fontFamily: 'monospace' })
+    const sprintValueStyle = new TextStyle({ fill: VALUE_COLOR, fontSize: 18, fontFamily: 'monospace', fontWeight: 'bold' })
+
+    this.sprintLinesLabel = new Text({ text: 'LINES', style: sprintLabelStyle })
+    this.sprintLinesValue = new Text({ text: '0 / 40', style: sprintValueStyle })
+    this.sprintTimerLabel = new Text({ text: 'TIME', style: sprintLabelStyle })
+    this.sprintTimerValue = new Text({ text: '00:00.000', style: sprintValueStyle })
+
+    for (const elem of [
+      this.sprintLinesLabel, this.sprintLinesValue,
+      this.sprintTimerLabel, this.sprintTimerValue,
+    ]) {
+      this.sprintPanel.addChild(elem)
+    }
+    this.container.addChild(this.sprintPanel)
   }
 
   resize(cellSize: number, boardOffsetX: number): void {
@@ -164,6 +195,23 @@ export class HUD {
     y += 60  // leave room below next-piece preview
     this.muteButton.x = pad
     this.muteButton.y = y
+
+    // Sprint panel — positioned starting at same y as score block
+    this.sprintPanel.x = pad
+    this.sprintPanel.y = 12
+
+    let sy = 0
+    this.sprintLinesLabel.x = 0
+    this.sprintLinesLabel.y = sy
+    sy += 18
+    this.sprintLinesValue.x = 0
+    this.sprintLinesValue.y = sy
+    sy += 32
+    this.sprintTimerLabel.x = 0
+    this.sprintTimerLabel.y = sy
+    sy += 18
+    this.sprintTimerValue.x = 0
+    this.sprintTimerValue.y = sy
   }
 
   update(state: GameState): void {
@@ -183,6 +231,11 @@ export class HUD {
     if (state.lines !== this.lastLines) {
       this.linesValue.text = String(state.lines)
       this.lastLines = state.lines
+    }
+
+    if (this.currentPlayMode === 'sprint' && state.lines !== this.lastSprintLines) {
+      this.sprintLinesValue.text = `${state.lines} / 40`
+      this.lastSprintLines = state.lines
     }
 
     if (state.nextPiece !== this.lastNextPiece) {
@@ -209,6 +262,29 @@ export class HUD {
 
   setVisible(visible: boolean): void {
     this.container.visible = visible
+  }
+
+  /**
+   * Switch between marathon and sprint display modes.
+   * Toggles panel visibility and resets change-detection caches.
+   */
+  setPlayMode(mode: 'marathon' | 'sprint'): void {
+    this.currentPlayMode = mode
+    this.panel.visible = mode === 'marathon'
+    this.sprintPanel.visible = mode === 'sprint'
+    // Reset caches to force next update() / updateSprintTimer() to redraw
+    this.lastSprintLines = -1
+    this.lastSprintTimerMs = -1
+  }
+
+  /**
+   * Update the sprint timer display. Called every render frame by main.ts
+   * while the sprint timer is running.
+   */
+  updateSprintTimer(elapsedMs: number): void {
+    if (elapsedMs === this.lastSprintTimerMs) return
+    this.lastSprintTimerMs = elapsedMs
+    this.sprintTimerValue.text = formatSprintTime(elapsedMs)
   }
 
   /** Register callback invoked when the player clicks the mute button. */

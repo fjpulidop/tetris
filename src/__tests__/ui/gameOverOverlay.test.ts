@@ -9,7 +9,7 @@
  * scope.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ---------------------------------------------------------------------------
 // All mock classes are defined INSIDE the factory (hoisting requirement).
@@ -22,6 +22,7 @@ vi.mock('pixi.js', () => {
     width = 0
     height = 0
     alpha = 1
+    visible = true
     eventMode: string = 'none'
     cursor: string = 'default'
     private _listeners: Record<string, Array<() => void>> = {}
@@ -86,6 +87,10 @@ vi.mock('pixi.js', () => {
     TextStyle: MockTextStyle,
   }
 })
+
+vi.mock('../../engine/persistence.js', () => ({
+  formatSprintTime: (ms: number) => `T:${ms}`,
+}))
 
 // Import the mocked pixi.js so we can construct stages in tests.
 import { Container as PixiContainer } from 'pixi.js'
@@ -287,5 +292,87 @@ describe('GameOverOverlay — "GAME OVER" title', () => {
     const texts = collectTexts(panelRoot)
     const titleText = texts.find(t => t.text?.includes('GAME OVER'))
     expect(titleText).toBeDefined()
+  })
+})
+
+describe('GameOverOverlay — showSprint', () => {
+  let stage: FakeContainer
+  let overlay: GameOverOverlay
+
+  beforeEach(() => {
+    stage = makeStage()
+    overlay = new GameOverOverlay(stage as never)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('showSprint(5000, false) sets title text to "SPRINT COMPLETE"', () => {
+    overlay.showSprint(5000, false)
+    const panelRoot = stage.children[0]!
+    const texts = collectTexts(panelRoot)
+    const titleText = texts.find(t => t.text?.includes('SPRINT COMPLETE'))
+    expect(titleText).toBeDefined()
+  })
+
+  it('showSprint(5000, false) sets score text to formatted time via formatSprintTime stub', () => {
+    overlay.showSprint(5000, false)
+    const panelRoot = stage.children[0]!
+    const texts = collectTexts(panelRoot)
+    // The mock formats as "T:5000"
+    const scoreText = texts.find(t => t.text === 'T:5000')
+    expect(scoreText).toBeDefined()
+  })
+
+  it('showSprint(5000, false) — pbText is not visible when isNewPB=false', () => {
+    overlay.showSprint(5000, false)
+    const panelRoot = stage.children[0]!
+    const texts = collectTexts(panelRoot)
+    // pbText has text 'New Best!' and should not be visible
+    const pbText = texts.find(t => t.text === 'New Best!')
+    expect(pbText).toBeDefined()
+    // visible property: MockText extends MockContainer which doesn't have visible by default,
+    // but GameOverOverlay sets it. We access it via the node.
+    expect((pbText as unknown as { visible: boolean }).visible).toBe(false)
+  })
+
+  it('showSprint(5000, true) — pbText is visible when isNewPB=true', () => {
+    overlay.showSprint(5000, true)
+    const panelRoot = stage.children[0]!
+    const texts = collectTexts(panelRoot)
+    const pbText = texts.find(t => t.text === 'New Best!')
+    expect(pbText).toBeDefined()
+    expect((pbText as unknown as { visible: boolean }).visible).toBe(true)
+  })
+
+  it('showSprint() adds panelRoot to stage', () => {
+    overlay.showSprint(5000, false)
+    expect(stage.children).toHaveLength(1)
+  })
+
+  it('hide() after showSprint() removes panelRoot and resets title to "GAME OVER"', () => {
+    overlay.showSprint(5000, false)
+    overlay.hide()
+    expect(stage.children).toHaveLength(0)
+    // After hide, show() should show "GAME OVER" again
+    overlay.show(0, 0)
+    const panelRoot = stage.children[0]!
+    const texts = collectTexts(panelRoot)
+    const titleText = texts.find(t => t.text?.includes('GAME OVER'))
+    expect(titleText).toBeDefined()
+  })
+
+  it('hide() after showSprint(5000, true) hides pbText', () => {
+    overlay.showSprint(5000, true)
+    overlay.hide()
+    // After hide, show marathon overlay — pbText should not be visible
+    overlay.show(100, 5)
+    const panelRoot = stage.children[0]!
+    const texts = collectTexts(panelRoot)
+    const pbText = texts.find(t => t.text === 'New Best!')
+    if (pbText) {
+      expect((pbText as unknown as { visible: boolean }).visible).toBe(false)
+    }
   })
 })

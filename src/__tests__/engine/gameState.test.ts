@@ -907,3 +907,154 @@ describe('createGameState — gameMode field', () => {
     expect(resumed.gameMode).toBe('monochrome')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Sprint mode — engine tests
+// ---------------------------------------------------------------------------
+
+/**
+ * Helper: create a sprint state already in 'playing' phase.
+ */
+function sprintState() {
+  const s = createGameState('classic', 'sprint')
+  const { state } = updateGameState(s, [GameAction.Start], 0)
+  return state
+}
+
+/**
+ * Helper: build a board with the given rows fully filled except one column,
+ * returning the board. Rows are specified as an array of row indices.
+ */
+function fillRowsExcept(board: ReturnType<typeof playingState>['board'], rows: number[], exceptCol: number) {
+  let b = board
+  for (const row of rows) {
+    for (let col = 0; col < BOARD_COLS; col++) {
+      if (col !== exceptCol) b = setCell(b, row, col, 1)
+    }
+  }
+  return b
+}
+
+describe('Sprint mode — engine', () => {
+  it('createGameState("classic", "sprint") returns playMode: "sprint" and timerStarted: false', () => {
+    const state = createGameState('classic', 'sprint')
+    expect(state.playMode).toBe('sprint')
+    expect(state.timerStarted).toBe(false)
+  })
+
+  it('createGameState() defaults to playMode: "marathon"', () => {
+    const state = createGameState()
+    expect(state.playMode).toBe('marathon')
+  })
+
+  it('first piece lock in Sprint sets timerStarted: true', () => {
+    const state = sprintState()
+    const { state: after } = updateGameState(state, [GameAction.HardDrop], 16)
+    // After first hard-drop (lock), timerStarted should be true
+    expect(after.timerStarted).toBe(true)
+  })
+
+  it('first piece lock in Marathon leaves timerStarted: false', () => {
+    const state = playingState()
+    const { state: after } = updateGameState(state, [GameAction.HardDrop], 16)
+    expect(after.timerStarted).toBe(false)
+  })
+
+  it('clearing exactly 40 lines in Sprint emits sprint-complete then game-over and sets phase: gameover', () => {
+    let state = sprintState()
+    // Bring lines to 36 (need 4 more to complete)
+    state = { ...state, lines: 36, level: 4 }
+    // Set up board with rows 16-19 filled except col 4 (I-piece fills col 4 for 4-line clear)
+    let board = state.board
+    board = fillRowsExcept(board, [16, 17, 18, 19], 4)
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 0, col: 2 }
+    state = { ...state, board, activePiece: iPiece }
+
+    const { state: after, events } = updateGameState(state, [GameAction.HardDrop], 16)
+
+    const sprintCompleteIdx = events.findIndex(e => e.type === 'sprint-complete')
+    const gameOverIdx = events.findIndex(e => e.type === 'game-over')
+
+    expect(sprintCompleteIdx).toBeGreaterThanOrEqual(0)
+    expect(gameOverIdx).toBeGreaterThan(sprintCompleteIdx)
+    expect(after.phase).toBe('gameover')
+    expect(after.lines).toBe(40)
+  })
+
+  it('clearing 39 lines in Sprint does NOT emit sprint-complete', () => {
+    let state = sprintState()
+    // Bring lines to 38 (need only 1 more; we clear 1 row to reach 39)
+    state = { ...state, lines: 38, level: 4 }
+    let board = state.board
+    // Fill row 19 cols 0-8, leave col 9 empty
+    for (let col = 0; col < 9; col++) board = setCell(board, 19, col, 1)
+    // I-piece rotation 1 at col=7 fills col 9 in rows 16-19; only row 19 is full
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 0, col: 7 }
+    state = { ...state, board, activePiece: iPiece }
+
+    const { state: after, events } = updateGameState(state, [GameAction.HardDrop], 16)
+
+    const sprintEvent = events.find(e => e.type === 'sprint-complete')
+    expect(sprintEvent).toBeUndefined()
+    expect(after.lines).toBe(39)
+    expect(after.phase).toBe('playing')
+  })
+
+  it('clearing more than 40 lines in Sprint caps state.lines at exactly 40', () => {
+    let state = sprintState()
+    // Bring lines to 38; clear 4 rows → 42, should be capped at 40
+    state = { ...state, lines: 38, level: 4 }
+    let board = state.board
+    board = fillRowsExcept(board, [16, 17, 18, 19], 4)
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 0, col: 2 }
+    state = { ...state, board, activePiece: iPiece }
+
+    const { state: after } = updateGameState(state, [GameAction.HardDrop], 16)
+    expect(after.lines).toBe(40)
+  })
+
+  it('Sprint complete via hard-drop sets phase: gameover', () => {
+    let state = sprintState()
+    state = { ...state, lines: 36, level: 4 }
+    let board = state.board
+    board = fillRowsExcept(board, [16, 17, 18, 19], 4)
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 0, col: 2 }
+    state = { ...state, board, activePiece: iPiece }
+
+    const { state: after } = updateGameState(state, [GameAction.HardDrop], 16)
+    expect(after.phase).toBe('gameover')
+  })
+
+  it('Sprint complete via gravity-lock sets phase: gameover and emits sprint-complete', () => {
+    let state = sprintState()
+    state = { ...state, lines: 36, level: 4 }
+    let board = state.board
+    board = fillRowsExcept(board, [16, 17, 18, 19], 4)
+    // I-piece East rotation at row=16, col=2 fills col 4 in rows 16-19
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 16, col: 2 }
+    state = {
+      ...state,
+      board,
+      activePiece: iPiece,
+      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0 },
+    }
+
+    const { state: after, events } = updateGameState(state, [], 100)
+    expect(after.phase).toBe('gameover')
+    const sprintEvent = events.find(e => e.type === 'sprint-complete')
+    expect(sprintEvent).toBeDefined()
+  })
+
+  it('Marathon game with 50+ lines does not emit sprint-complete', () => {
+    let state = playingState()
+    state = { ...state, lines: 46, level: 5 }
+    let board = state.board
+    board = fillRowsExcept(board, [16, 17, 18, 19], 4)
+    const iPiece = { type: 'I' as const, rotation: 1 as const, row: 0, col: 2 }
+    state = { ...state, board, activePiece: iPiece }
+
+    const { events } = updateGameState(state, [GameAction.HardDrop], 16)
+    const sprintEvent = events.find(e => e.type === 'sprint-complete')
+    expect(sprintEvent).toBeUndefined()
+  })
+})
