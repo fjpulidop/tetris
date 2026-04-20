@@ -28,11 +28,14 @@ const FONT_FAMILY = 'monospace'
 export class MainMenu {
   /** Called when the Exit button is tapped/clicked. Default is a no-op. */
   onExit: () => void = () => undefined
+  /** Called when the SPRINT button is tapped/clicked. Default is a no-op. */
+  onSprintStart: () => void = () => undefined
 
   private container: Container
   private titleText: Text
   private playButton: Container
   private monochromeButton: Container
+  private sprintButton: Container
   private exitButton: Container
   private fallbackText: Text
   private menuActionBuffer: GameAction[] = []
@@ -78,7 +81,7 @@ export class MainMenu {
     }
 
     // Play button — pushes GameAction.Start into the action buffer
-    this.playButton = this.buildButton('PLAY')
+    this.playButton = this.buildButton('MARATHON')
     this.playButton.on('pointerup', () => {
       this.menuActionBuffer.push(GameAction.Start)
     })
@@ -91,6 +94,13 @@ export class MainMenu {
       this.menuModeBuffer.push('monochrome')
     })
     this.container.addChild(this.monochromeButton)
+
+    // Sprint button — invokes onSprintStart callback
+    this.sprintButton = this.buildButton('SPRINT')
+    this.sprintButton.on('pointerup', () => {
+      this.onSprintStart()
+    })
+    this.container.addChild(this.sprintButton)
 
     // Exit button — invokes the onExit callback
     this.exitButton = this.buildButton('EXIT')
@@ -202,13 +212,14 @@ export class MainMenu {
       btn.y = centerY
     }
 
-    resizeButton(this.playButton, width / 2, height * 0.56)
-    resizeButton(this.monochromeButton, width / 2, height * 0.56 + 70)
-    resizeButton(this.exitButton, width / 2, height * 0.56 + 140)
+    resizeButton(this.playButton,       width / 2, height * 0.52)
+    resizeButton(this.monochromeButton, width / 2, height * 0.52 + 60)
+    resizeButton(this.sprintButton,     width / 2, height * 0.52 + 120)
+    resizeButton(this.exitButton,       width / 2, height * 0.52 + 180)
 
     // Position fallback message below buttons
     this.fallbackText.x = width / 2
-    this.fallbackText.y = height * 0.56 + 220
+    this.fallbackText.y = height * 0.52 + 260
   }
 
   /**

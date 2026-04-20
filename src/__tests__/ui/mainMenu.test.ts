@@ -240,8 +240,8 @@ describe('MainMenu — onExit callback', () => {
 
     const menuContainer = stage.children[0]!
     const interactives = collectInteractives(menuContainer)
-    // Exit button is index 2 in depth-first traversal (after PLAY and MONOCHROME)
-    interactives[2]?.emit('pointerup')
+    // Exit button is index 3 in depth-first traversal (MARATHON + MONOCHROME + SPRINT + EXIT)
+    interactives[3]?.emit('pointerup')
 
     expect(callback).toHaveBeenCalledTimes(1)
   })
@@ -359,10 +359,10 @@ describe('MONOCHROME button', () => {
     menu = new MainMenu(stage as never, app as never)
   })
 
-  it('renders a third interactive button (PLAY, MONOCHROME, EXIT)', () => {
+  it('renders four interactive buttons (MARATHON, MONOCHROME, SPRINT, EXIT)', () => {
     const menuContainer = stage.children[0]!
     const interactiveChildren = collectInteractives(menuContainer)
-    expect(interactiveChildren.length).toBe(3) // play, monochrome, exit
+    expect(interactiveChildren.length).toBe(4) // marathon, monochrome, sprint, exit
   })
 
   it('flushMode() returns null before any interaction', () => {
@@ -381,8 +381,8 @@ describe('MONOCHROME button', () => {
     expect(menu.flushMode()).toBe('monochrome')
   })
 
-  it('clicking PLAY leaves flushMode() returning null', () => {
-    const playBtn = getButtonByLabel(menu, 'PLAY')
+  it('clicking MARATHON leaves flushMode() returning null', () => {
+    const playBtn = getButtonByLabel(menu, 'MARATHON')
     playBtn.emit('pointerup')
     expect(menu.flushMode()).toBeNull()
   })
@@ -392,5 +392,64 @@ describe('MONOCHROME button', () => {
     monoBtn.emit('pointerup')
     menu.flushMode() // drain
     expect(menu.flushMode()).toBeNull()
+  })
+})
+
+describe('MainMenu — onSprintStart callback', () => {
+  it('onSprintStart is invoked when Sprint button (index 2) emits pointerup', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    const menu = new MainMenu(stage as never, app as never)
+
+    const callback = vi.fn()
+    menu.onSprintStart = callback
+
+    const menuContainer = stage.children[0]!
+    const interactives = collectInteractives(menuContainer)
+    // Sprint button is index 2 (MARATHON=0, MONOCHROME=1, SPRINT=2, EXIT=3)
+    interactives[2]?.emit('pointerup')
+
+    expect(callback).toHaveBeenCalledTimes(1)
+  })
+
+  it('onSprintStart is NOT invoked when MARATHON button fires', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    const menu = new MainMenu(stage as never, app as never)
+
+    const callback = vi.fn()
+    menu.onSprintStart = callback
+
+    const menuContainer = stage.children[0]!
+    const interactives = collectInteractives(menuContainer)
+    interactives[0]?.emit('pointerup') // MARATHON
+
+    expect(callback).not.toHaveBeenCalled()
+  })
+
+  it('onSprintStart is NOT invoked when EXIT button fires', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    const menu = new MainMenu(stage as never, app as never)
+
+    const callback = vi.fn()
+    menu.onSprintStart = callback
+
+    const menuContainer = stage.children[0]!
+    const interactives = collectInteractives(menuContainer)
+    interactives[3]?.emit('pointerup') // EXIT
+
+    expect(callback).not.toHaveBeenCalled()
+  })
+
+  it('default onSprintStart (no-op) does not throw when Sprint button fires', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    new MainMenu(stage as never, app as never)
+    // Do NOT assign onSprintStart — use the default no-op
+
+    const menuContainer = stage.children[0]!
+    const interactives = collectInteractives(menuContainer)
+    expect(() => interactives[2]?.emit('pointerup')).not.toThrow()
   })
 })

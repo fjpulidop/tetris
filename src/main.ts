@@ -17,6 +17,7 @@ import type { Filter } from 'pixi.js'
 // Engine
 import { createGameState, updateGameState } from './engine/gameState.js'
 import { BOARD_COLS, BOARD_ROWS } from './engine/board.js'
+import { loadSprintPB, saveSprintPB } from './engine/persistence.js'
 
 // Renderer
 import { createPixiApp } from './renderer/app.js'
@@ -127,6 +128,20 @@ async function main(): Promise<void> {
   /** Teardown function for the Escape-key listener active during 'intro' phase. */
   let removeIntroKeyListener: (() => void) | null = null
 
+  // --- Sprint mode state ---
+  /** Which play mode was selected at the main menu. */
+  let selectedPlayMode: 'marathon' | 'sprint' = 'marathon'
+  /** Whether the Sprint wall-clock timer is currently accumulating. */
+  let sprintTimerRunning = false
+  /** Accumulated elapsed milliseconds for the current Sprint run. */
+  let sprintElapsedMs = 0
+  /** performance.now() snapshot of the last render frame with timer running. */
+  let sprintLastTickTime = 0
+  /** Final elapsed ms captured on sprint-complete — used by game-over overlay. */
+  let finalSprintTimeMs = 0
+  /** Previous value of state.timerStarted — for false→true edge detection. */
+  let prevTimerStarted = false
+
   // --- Responsive layout ---
   function computeLayout(): { cellSize: number; offsetX: number; offsetY: number } {
     const cellSize = Math.floor(
@@ -164,6 +179,7 @@ async function main(): Promise<void> {
   // Main menu — rendered on top of everything; destroyed on first Start action
   let mainMenu: MainMenu | null = new MainMenu(mainMenuContainer, app)
   mainMenu.onExit = handleExit
+  mainMenu.onSprintStart = () => { startGame('sprint') }
   removeIntroKeyListener = attachIntroKeyListener()
 
   const gameOverOverlay = new GameOverOverlay(modalContainer)
@@ -300,6 +316,36 @@ async function main(): Promise<void> {
   }
 
   /**
+   * Transition directly from intro to playing for the given play mode.
+   * Used by Sprint (bypasses the GameAction.Start accumulator path) and
+   * for Marathon when explicit mode is needed.
+   */
+  function startGame(playMode: 'marathon' | 'sprint'): void {
+    selectedPlayMode = playMode
+    audioManager.onPhaseChange('playing')
+    mainMenu?.destroy()
+    mainMenu = null
+    if (removeIntroKeyListener !== null) {
+      removeIntroKeyListener()
+      removeIntroKeyListener = null
+    }
+    // Build fresh state with correct play mode, then advance past 'intro'
+    const fresh = createGameState(pendingMode, playMode)
+    const result = updateGameState(fresh, [GameAction.Start], 0)
+    state = result.state
+    prevPhase = state.phase
+    prevTimerStarted = false
+
+    hud.setPlayMode(playMode)
+    hud.setVisible(true)
+
+    // Reset Sprint timer state regardless of mode (safe no-op for Marathon)
+    sprintTimerRunning = false
+    sprintElapsedMs = 0
+    finalSprintTimeMs = 0
+  }
+
+  /**
    * Restart the game immediately from a fresh state, bypassing the intro splash.
    *
    * Creates a new game in 'playing' phase without showing the splash screen.
@@ -316,11 +362,17 @@ async function main(): Promise<void> {
       removePauseKeyListener = null
     }
 
-    const fresh = createGameState()
+    const fresh = createGameState(state.gameMode, selectedPlayMode)
     const result = updateGameState(fresh, [GameAction.Start], 0)
     state = result.state
     prevPhase = state.phase
+    prevTimerStarted = false
 
+    sprintTimerRunning = false
+    sprintElapsedMs = 0
+    finalSprintTimeMs = 0
+
+    hud.setPlayMode(selectedPlayMode)
     hud.setVisible(true)
   }
 
@@ -341,12 +393,20 @@ async function main(): Promise<void> {
       removePauseKeyListener = null
     }
 
+    sprintTimerRunning = false
+    sprintElapsedMs = 0
+    finalSprintTimeMs = 0
+    prevTimerStarted = false
+    selectedPlayMode = 'marathon'
+    hud.setPlayMode('marathon')
+
     // createGameState() defaults to 'classic'; mode choice is not persisted across sessions.
     state = createGameState()
     prevPhase = state.phase
 
     mainMenu = new MainMenu(mainMenuContainer, app)
     mainMenu.onExit = handleExit
+    mainMenu.onSprintStart = () => { startGame('sprint') }
     mainMenu.resize(window.innerWidth, window.innerHeight)
     removeIntroKeyListener = attachIntroKeyListener()
 
@@ -416,9 +476,9 @@ async function main(): Promise<void> {
       ]
 
       // Capture mode selection from main menu (null if player clicked PLAY or no click yet)
-      const selectedMode = mainMenu?.flushMode() ?? null
-      if (selectedMode !== null) {
-        pendingMode = selectedMode
+      const menuMode = mainMenu?.flushMode() ?? null
+      if (menuMode !== null) {
+        pendingMode = menuMode
       }
 
       // If a Start action arrived while in intro, reinitialize state with the chosen mode
@@ -442,8 +502,18 @@ async function main(): Promise<void> {
       state = result.state
       renderState = state
 
+      // Sprint timer start: detect false → true transition on timerStarted
+      if (!prevTimerStarted && state.timerStarted) {
+        sprintTimerRunning = true
+        sprintLastTickTime = performance.now()
+      }
+      prevTimerStarted = state.timerStarted
+
       // Detect intro → playing transition: destroy main menu and reveal HUD
       if (phaseBeforeUpdate === 'intro' && state.phase === 'playing') {
+        // This path is only reached for Marathon (Sprint uses startGame() directly).
+        selectedPlayMode = 'marathon'
+        hud.setPlayMode('marathon')
         audioManager.onPhaseChange('playing')
         mainMenu?.destroy()
         mainMenu = null
@@ -452,6 +522,7 @@ async function main(): Promise<void> {
           removeIntroKeyListener = null
         }
         hud.setVisible(true)
+        prevTimerStarted = false
       }
 
       // Pass events to effects renderer and audio layer
@@ -459,6 +530,10 @@ async function main(): Promise<void> {
         effectsRenderer.onEvents(result.events)
         audioManager.onEvents(result.events)
         for (const event of result.events) {
+          if (event.type === 'sprint-complete') {
+            sprintTimerRunning = false
+            finalSprintTimeMs = sprintElapsedMs
+          }
           if (event.type === 'chain-explosion') {
             const payload = event.payload as { depth: number } | undefined
             if (payload) {
@@ -473,6 +548,13 @@ async function main(): Promise<void> {
       }
 
       accumulator -= LOGIC_TICK_MS
+    }
+
+    // Sprint wall-clock timer — accumulates on every render frame
+    if (sprintTimerRunning) {
+      sprintElapsedMs += now - sprintLastTickTime
+      sprintLastTickTime = now
+      hud.updateSprintTimer(sprintElapsedMs)
     }
 
     // --- Phase-transition edge detection ---
@@ -507,7 +589,16 @@ async function main(): Promise<void> {
     const justGameOver = prevPhase !== 'gameover' && currentPhase === 'gameover'
 
     if (justGameOver) {
-      gameOverOverlay.show(state.score, state.lines)
+      if (selectedPlayMode === 'sprint') {
+        const pb = loadSprintPB()
+        const isNewPB = pb === null || finalSprintTimeMs < pb
+        if (isNewPB) {
+          saveSprintPB(finalSprintTimeMs)
+        }
+        gameOverOverlay.showSprint(finalSprintTimeMs, isNewPB)
+      } else {
+        gameOverOverlay.show(state.score, state.lines)
+      }
     }
 
     prevPhase = currentPhase
