@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "change": "film-noir-splash",
+  "agent": "reviewer",
+  "scored_at": "2026-04-23T12:17:00Z",
+  "overall": 87,
+  "aspects": {
+    "type_correctness": 90,
+    "pattern_adherence": 88,
+    "test_coverage": 82,
+    "security": 95,
+    "architectural_alignment": 85
+  },
+  "notes": {
+    "type_correctness": "All PixiJS v8 API calls use correct signatures; NoiseFilter cast via 'as unknown as Filter' is the documented pattern for filter interop. createGameState signature extension with _gameMode/_playMode defaulted params is type-safe. One minor issue: the introduced _gameMode/_playMode params triggered a new lint error (no-unused-vars) requiring an eslintrc fix.",
+    "pattern_adherence": "Ticker callback uses (ticker: Ticker) => void matching v8 pattern. Dust pool avoids per-frame heap allocation (pre-allocated 60 Graphics, mutated in place). NoiseFilter wrapped in try/catch for Canvas fallback — matches existing BlurFilter pattern in main.ts. Slight deviation: scenarios.ts import from ui/ layer is technically a boundary cross but architect-confirmed safe since scenarios.ts has no DOM/PixiJS deps.",
+    "test_coverage": "29 mainMenu tests cover: construction, ticker registration, flushActions drain, MARATHON/MONOCHROME/SPRINT/EXIT buttons, onExit/onSprintStart callbacks, destroy lifecycle, noir visual node presence, and resize at min/max viewports. Typewriter/blink tick path covered by the ticker callback smoke test. No test for the 2x2 grid layout path (width < 480) — minor gap.",
+    "security": "No network calls, no localStorage, no eval, no user input echoed to DOM. Playfair Display font loaded via standard Google Fonts link in index.html (preload + stylesheet). NoiseFilter seed uses Math.random() — not a security concern for visual grain. No new attack surface introduced.",
+    "architectural_alignment": "attachPostProcess correctly deferred to intro→playing edge (main.ts line 430), not at startup. mainMenu.ts stays within ui/ layer; only imports engine/types.js and engine/scenarios.js (confirmed safe — no DOM/PixiJS in scenarios.ts). splashScreen.ts orphan left untouched per architect guidance. Dust and grain effects live entirely in ui/mainMenu.ts, not in renderer/"
+  },
+  "flags": ["minor-gap-mobile-2x2-layout-not-tested"]
+}

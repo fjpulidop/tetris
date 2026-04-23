@@ -17,6 +17,7 @@ import type { Filter } from 'pixi.js'
 // Engine
 import { createGameState, updateGameState } from './engine/gameState.js'
 import { BOARD_COLS, BOARD_ROWS } from './engine/board.js'
+import { DEFAULT_SCENARIO_ID } from './engine/scenarios.js'
 
 // Renderer
 import { createPixiApp } from './renderer/app.js'
@@ -72,8 +73,8 @@ async function main(): Promise<void> {
   app.stage.addChild(mainMenuContainer)
   app.stage.addChild(modalContainer)
 
-  // Attach post-processing (glow/bloom) to board and piece containers
-  attachPostProcess(boardContainer, pieceContainer, app)
+  // Post-processing is deferred to the intro → playing transition so the
+  // splash/menu screen remains noir-dark (no bloom during 'intro' phase).
 
   // Instantiate renderers, input handlers, HUD, PauseModal
   const boardRenderer = new BoardRenderer(boardContainer)
@@ -111,6 +112,8 @@ async function main(): Promise<void> {
   // --- Loop-level pause state ---
   /** Phase observed on the previous loop iteration (edge-detection). */
   let prevPhase = state.phase
+  /** Scenario selected from the main menu picker; applied to createGameState() when Start fires. */
+  let pendingScenarioId: string = DEFAULT_SCENARIO_ID
   /** Which option is highlighted in the pause modal. */
   let pauseSelectedIndex = 0
   /**
@@ -312,7 +315,7 @@ async function main(): Promise<void> {
       removePauseKeyListener = null
     }
 
-    const fresh = createGameState()
+    const fresh = createGameState('classic', 'marathon', state.scenarioId)
     const result = updateGameState(fresh, [GameAction.Start], 0)
     state = result.state
     prevPhase = state.phase
@@ -337,6 +340,7 @@ async function main(): Promise<void> {
       removePauseKeyListener = null
     }
 
+    pendingScenarioId = DEFAULT_SCENARIO_ID
     state = createGameState()
     prevPhase = state.phase
 
@@ -385,12 +389,25 @@ async function main(): Promise<void> {
         ...touchInput.getHeldActions(LOGIC_TICK_MS),
       ]
 
+      // Capture scenario selection from main menu picker
+      const scenarioFromMenu = mainMenu?.flushScenario() ?? null
+      if (scenarioFromMenu !== null) {
+        pendingScenarioId = scenarioFromMenu
+      }
+
       // Deduplicate: combine buffered + held, remove duplicates
       const allActions = deduplicateActions([...bufferedActions, ...heldActions])
 
       // Notify audio layer of player actions (before engine processes them)
       for (const action of allActions) {
         audioManager.onAction(action)
+      }
+
+      // If a Start action arrived while in intro, reinitialize state with the chosen
+      // scenario so that state.scenarioId is set before the engine transitions intro → playing.
+      if (state.phase === 'intro' && allActions.includes(GameAction.Start)) {
+        state = createGameState('classic', 'marathon', pendingScenarioId)
+        pendingScenarioId = DEFAULT_SCENARIO_ID // reset scenario for next game
       }
 
       // Advance engine
@@ -409,6 +426,8 @@ async function main(): Promise<void> {
           removeIntroKeyListener = null
         }
         hud.setVisible(true)
+        // Apply bloom/glow now that gameplay is starting — keeps splash noir-dark
+        attachPostProcess(boardContainer, pieceContainer, app)
       }
 
       // Pass events to effects renderer and audio layer

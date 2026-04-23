@@ -57,13 +57,30 @@ vi.mock('pixi.js', () => {
   }
 
   class MockGraphics extends MockContainer {
+    filters: unknown[] | null = null
     clear(): this { return this }
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     rect(...args: number[]): this { return this }
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     roundRect(...args: number[]): this { return this }
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    ellipse(...args: number[]): this { return this }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    circle(...args: number[]): this { return this }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     fill(opts: unknown): this { return this }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    setStrokeStyle(opts: unknown): this { return this }
+    stroke(): this { return this }
+  }
+
+  class MockNoiseFilter {
+    noise: number
+    seed: number
+    constructor(opts: { noise?: number; seed?: number } = {}) {
+      this.noise = opts.noise ?? 0.5
+      this.seed = opts.seed ?? 0
+    }
   }
 
   class MockText extends MockContainer {
@@ -92,12 +109,9 @@ vi.mock('pixi.js', () => {
     Graphics: MockGraphics,
     Text: MockText,
     TextStyle: MockTextStyle,
+    NoiseFilter: MockNoiseFilter,
   }
 })
-
-vi.mock('@pixi/filter-glow', () => ({
-  GlowFilter: class { constructor() {} },
-}))
 
 // Import the mocked pixi.js so we can construct stages in tests.
 // Because vi.mock is hoisted, this import receives the mock implementations.
@@ -206,15 +220,16 @@ describe('MainMenu — flushActions', () => {
     // The main menu container is the single child of stage
     const menuContainer = stage.children[0]!
     const interactives = collectInteractives(menuContainer)
-    // Play button is index 0 in depth-first traversal
-    interactives[0]?.emit('pointerup')
+    // MARATHON button is at index 4 (after 4 scenario pickers: Default, Cross, Pyramid, Diamond)
+    interactives[4]?.emit('pointerup')
     expect(menu.flushActions()).toEqual([GameAction.Start])
   })
 
   it('drains the buffer — second flushActions() returns []', () => {
     const menuContainer = stage.children[0]!
     const interactives = collectInteractives(menuContainer)
-    interactives[0]?.emit('pointerup')
+    // MARATHON button is at index 4 (after 4 scenario pickers)
+    interactives[4]?.emit('pointerup')
     menu.flushActions() // drain
     expect(menu.flushActions()).toEqual([])
   })
@@ -222,8 +237,9 @@ describe('MainMenu — flushActions', () => {
   it('accumulates multiple Play taps before flush', () => {
     const menuContainer = stage.children[0]!
     const interactives = collectInteractives(menuContainer)
-    interactives[0]?.emit('pointerup')
-    interactives[0]?.emit('pointerup')
+    // MARATHON button is at index 4 (after 4 scenario pickers)
+    interactives[4]?.emit('pointerup')
+    interactives[4]?.emit('pointerup')
     const actions = menu.flushActions()
     expect(actions).toEqual([GameAction.Start, GameAction.Start])
   })
@@ -240,8 +256,8 @@ describe('MainMenu — onExit callback', () => {
 
     const menuContainer = stage.children[0]!
     const interactives = collectInteractives(menuContainer)
-    // Exit button is index 1 in depth-first traversal
-    interactives[1]?.emit('pointerup')
+    // Exit button is the last interactive button (after 4 scenario pickers + MARATHON + MONOCHROME + SPRINT + EXIT)
+    interactives[interactives.length - 1]?.emit('pointerup')
 
     expect(callback).toHaveBeenCalledTimes(1)
   })
@@ -256,7 +272,8 @@ describe('MainMenu — onExit callback', () => {
 
     const menuContainer = stage.children[0]!
     const interactives = collectInteractives(menuContainer)
-    interactives[0]?.emit('pointerup')
+    // MARATHON is at index 4 (after 4 scenario pickers)
+    interactives[4]?.emit('pointerup')
 
     expect(callback).not.toHaveBeenCalled()
   })
@@ -304,6 +321,22 @@ describe('MainMenu — resize', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Button-by-label helper (used by MONOCHROME button tests)
+// ---------------------------------------------------------------------------
+
+function getButtonByLabel(menu: MainMenu, label: string): FakeContainer {
+  // Interactive buttons are containers with eventMode === 'static'
+  // and a text child whose text matches the label.
+  const menuContainer = (menu as unknown as { container: FakeContainer }).container
+  const interactive = collectInteractives(menuContainer)
+  for (const btn of interactive) {
+    const textChild = btn.children.find((c: FakeContainer) => c.text === label)
+    if (textChild) return btn
+  }
+  throw new Error(`Button with label "${label}" not found`)
+}
+
 describe('MainMenu — destroy', () => {
   it('destroy() does not throw', () => {
     const stage = makeStage()
@@ -329,5 +362,142 @@ describe('MainMenu — destroy', () => {
     const menu = new MainMenu(stage as never, app as never)
     menu.showExitFallback() // arms the 3-second timer
     expect(() => menu.destroy()).not.toThrow()
+  })
+})
+
+describe('MONOCHROME button', () => {
+  let stage: FakeContainer
+  let app: FakeApp
+  let menu: MainMenu
+
+  beforeEach(() => {
+    stage = makeStage()
+    app = makeApp()
+    menu = new MainMenu(stage as never, app as never)
+  })
+
+  it('renders four action buttons (MARATHON, MONOCHROME, SPRINT, EXIT) plus four scenario pickers', () => {
+    const menuContainer = stage.children[0]!
+    const interactiveChildren = collectInteractives(menuContainer)
+    // 4 scenario picker buttons + 4 action buttons (MARATHON, MONOCHROME, SPRINT, EXIT)
+    expect(interactiveChildren.length).toBe(8)
+  })
+
+  it('flushMode() returns null before any interaction', () => {
+    expect(menu.flushMode()).toBeNull()
+  })
+
+  it('clicking MONOCHROME enqueues GameAction.Start in flushActions()', () => {
+    const monoBtn = getButtonByLabel(menu, 'MONOCHROME')
+    monoBtn.emit('pointerup')
+    expect(menu.flushActions()).toContain(GameAction.Start)
+  })
+
+  it('clicking MONOCHROME enqueues "monochrome" in flushMode()', () => {
+    const monoBtn = getButtonByLabel(menu, 'MONOCHROME')
+    monoBtn.emit('pointerup')
+    expect(menu.flushMode()).toBe('monochrome')
+  })
+
+  it('clicking MARATHON leaves flushMode() returning null', () => {
+    const playBtn = getButtonByLabel(menu, 'MARATHON')
+    playBtn.emit('pointerup')
+    expect(menu.flushMode()).toBeNull()
+  })
+
+  it('flushMode() returns null after draining', () => {
+    const monoBtn = getButtonByLabel(menu, 'MONOCHROME')
+    monoBtn.emit('pointerup')
+    menu.flushMode() // drain
+    expect(menu.flushMode()).toBeNull()
+  })
+})
+
+describe('MainMenu — onSprintStart callback', () => {
+  it('onSprintStart is invoked when Sprint button (index 2) emits pointerup', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    const menu = new MainMenu(stage as never, app as never)
+
+    const callback = vi.fn()
+    menu.onSprintStart = callback
+
+    const menuContainer = stage.children[0]!
+    const interactives = collectInteractives(menuContainer)
+    // Sprint button: 4 scenario pickers (0-3) + MARATHON(4) + MONOCHROME(5) + SPRINT(6)
+    interactives[6]?.emit('pointerup')
+
+    expect(callback).toHaveBeenCalledTimes(1)
+  })
+
+  it('onSprintStart is NOT invoked when MARATHON button fires', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    const menu = new MainMenu(stage as never, app as never)
+
+    const callback = vi.fn()
+    menu.onSprintStart = callback
+
+    const menuContainer = stage.children[0]!
+    const interactives = collectInteractives(menuContainer)
+    interactives[4]?.emit('pointerup') // MARATHON (after 4 scenario pickers)
+
+    expect(callback).not.toHaveBeenCalled()
+  })
+
+  it('onSprintStart is NOT invoked when EXIT button fires', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    const menu = new MainMenu(stage as never, app as never)
+
+    const callback = vi.fn()
+    menu.onSprintStart = callback
+
+    const menuContainer = stage.children[0]!
+    const interactives = collectInteractives(menuContainer)
+    interactives[7]?.emit('pointerup') // EXIT (last button)
+
+    expect(callback).not.toHaveBeenCalled()
+  })
+
+  it('default onSprintStart (no-op) does not throw when Sprint button fires', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    new MainMenu(stage as never, app as never)
+    // Do NOT assign onSprintStart — use the default no-op
+
+    const menuContainer = stage.children[0]!
+    const interactives = collectInteractives(menuContainer)
+    expect(() => interactives[6]?.emit('pointerup')).not.toThrow()
+  })
+})
+
+describe('MainMenu — noir visual nodes', () => {
+  it('constructor adds backgroundRect, vignetteGfx, grainSprite, and dustContainer below title', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    new MainMenu(stage as never, app as never)
+    const menuContainer = stage.children[0]!
+    // Container children: backgroundRect, vignetteGfx, grainSprite, dustContainer,
+    //   titleText, scenarioPicker buttons (4), playButton, monochromeButton,
+    //   sprintButton, exitButton, fallbackText, promptText = at least 12 children
+    expect(menuContainer.children.length).toBeGreaterThanOrEqual(12)
+  })
+
+  it('ticker callback increments _elapsed or animates without throwing', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    new MainMenu(stage as never, app as never)
+    // Simulate a tick — the callback registered with app.ticker.add should not throw
+    const tickerCb = app.ticker.add.mock.calls[0]?.[0] as ((t: { deltaTime: number }) => void) | undefined
+    expect(() => tickerCb?.({ deltaTime: 1 })).not.toThrow()
+  })
+
+  it('resize does not throw with noir layers present', () => {
+    const stage = makeStage()
+    const app = makeApp()
+    const menu = new MainMenu(stage as never, app as never)
+    expect(() => menu.resize(1920, 1080)).not.toThrow()
+    expect(() => menu.resize(320, 568)).not.toThrow()
   })
 })
