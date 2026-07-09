@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "change": "randomize-per-piece-fall-speed",
+  "agent": "reviewer",
+  "scored_at": "2026-07-09T09:30:00Z",
+  "overall": 96,
+  "aspects": {
+    "type_correctness": 98,
+    "pattern_adherence": 97,
+    "test_coverage": 95,
+    "security": 100,
+    "architectural_alignment": 96
+  },
+  "notes": {
+    "type_correctness": "initialGravityState(level: number) breaking-change signature is enforced by TypeScript strict mode; all 5 call sites in gameState.ts compile and pass the correctly-scoped in-function `level` variable (post level-up, not stale state.level). Build (tsc && vite build) is clean.",
+    "pattern_adherence": "Randomization pinned once in initialGravityState() matching the existing '7-bag randomizer' Math.random() precedent already used in pieceBag.ts; clamping logic in initialGravityState is copy-consistent with applyGravity's existing clampedLevel logic; the retained-but-unused `level` param in applyGravity matches the design doc's explicit compatibility decision.",
+    "test_coverage": "245/245 tests pass, 99.7% line coverage, 100% function coverage. New randomization describe block (200-sample range checks, non-determinism check, level-20 floor check, level-0/25 clamping checks) directly covers the proposal's acceptance criteria. One uncovered defensive branch (gravity.ts:85, the `?? GRAVITY_TABLE[length-1]!` fallback) is unreachable given the clamping guarantee — acceptable, matches existing codebase convention of asserting the same kind of invariant elsewhere.",
+    "security": "No security-relevant surface — internal pure engine module, Math.random() used for gameplay jitter only (already the existing pattern for piece order), no user input, no external I/O.",
+    "architectural_alignment": "Change is fully contained to src/engine/gravity.ts and its 5 call sites in gameState.ts, consistent with the proposal's stated blast radius. Engine purity model preserved — no module-level mutable state introduced, randomization happens exactly once per piece spawn as required. Lock delay, soft drop, and GRAVITY_TABLE untouched, matching all 4 acceptance-criteria constraints from tasks.md."
+  },
+  "flags": []
+}

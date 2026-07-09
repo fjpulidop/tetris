@@ -379,7 +379,7 @@ describe('updateGameState — gravity-triggered lock (no hard drop)', () => {
     state = {
       ...state,
       activePiece: floorPiece,
-      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0 },
+      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0, pieceDropIntervalMs: 1000 },
     }
 
     // dt of 100 should expire the 10ms remaining on the lock timer
@@ -414,7 +414,7 @@ describe('updateGameState — gravity-triggered lock (no hard drop)', () => {
       board,
       activePiece: iPiece,
       // Set lock timer to nearly expired so gravity lock triggers
-      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0 },
+      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0, pieceDropIntervalMs: 1000 },
     }
 
     const { state: after, events } = updateGameState(state, [], 100)
@@ -442,7 +442,7 @@ describe('updateGameState — gravity-triggered lock (no hard drop)', () => {
       activePiece: iPiece,
       lines: 8, // 8 + 4 = 12 -> level 2
       level: 1,
-      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0 },
+      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0, pieceDropIntervalMs: 1000 },
     }
 
     const { state: after, events } = updateGameState(state, [], 100)
@@ -474,7 +474,7 @@ describe('updateGameState — gravity-triggered lock (no hard drop)', () => {
       board,
       activePiece: tPiece,
       nextPiece: 'I' as const,
-      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0 },
+      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0, pieceDropIntervalMs: 1000 },
     }
 
     const { state: after, events } = updateGameState(state, [], 100)
@@ -644,7 +644,7 @@ describe('updateGameState — lock resets gravity for movement', () => {
     state = {
       ...state,
       activePiece: floorPiece,
-      gravityState: { gravityAccum: 0, lockTimer: 100, lockResetCount: 0 },
+      gravityState: { gravityAccum: 0, lockTimer: 100, lockResetCount: 0, pieceDropIntervalMs: 1000 },
     }
     const { state: after } = updateGameState(state, [GameAction.MoveLeft], 16)
     // Lock timer should have been reset (higher than it was minus dtMs)
@@ -660,7 +660,7 @@ describe('updateGameState — lock resets gravity for movement', () => {
     state = {
       ...state,
       activePiece: floorPiece,
-      gravityState: { gravityAccum: 0, lockTimer: 100, lockResetCount: 0 },
+      gravityState: { gravityAccum: 0, lockTimer: 100, lockResetCount: 0, pieceDropIntervalMs: 1000 },
     }
     const { state: after } = updateGameState(state, [GameAction.RotateCW], 16)
     if (after.activePiece) {
@@ -703,7 +703,7 @@ describe('updateGameState — empty piece bag triggers reshuffle', () => {
       ...state,
       activePiece: floorPiece,
       pieceBag: [], // empty bag
-      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0 },
+      gravityState: { gravityAccum: 0, lockTimer: 10, lockResetCount: 0, pieceDropIntervalMs: 1000 },
     }
     const { state: after } = updateGameState(state, [], 100)
     if (after.phase === 'playing') {

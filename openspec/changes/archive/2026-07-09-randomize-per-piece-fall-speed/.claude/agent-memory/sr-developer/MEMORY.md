@@ -1,0 +1,2 @@
+- [Tooling](tooling.md) — no `opsx:apply` skill exists; use `openspec instructions apply --change <name> --json`; node_modules may be missing in fresh worktrees
+- [Tetris repo conventions](tetris-conventions.md) — no literal "Tetris" word, layered ESLint import restrictions, no-non-null-assertion is warn-only, pure engine layer
