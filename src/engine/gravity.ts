@@ -61,14 +61,37 @@ export interface GravityState {
   lockTimer: number
   /** Number of times the lock timer has been reset for this piece. */
   lockResetCount: number
+  /**
+   * Randomized drop interval (ms per row) for the current piece, drawn once
+   * at spawn time from `[0.5x, 1.5x)` of the level's `GRAVITY_TABLE` base
+   * interval. Pinned for the piece's entire lifetime — never recomputed
+   * mid-piece by `applyGravity`.
+   */
+  pieceDropIntervalMs: number
 }
 
-/** Return the initial gravity state for a newly spawned piece. */
-export function initialGravityState(): GravityState {
+/**
+ * Return the initial gravity state for a newly spawned piece.
+ *
+ * Rolls a randomized drop interval for this piece, centered on the given
+ * level's `GRAVITY_TABLE` base interval (uniformly within `[0.5x, 1.5x)`),
+ * and pins it as `pieceDropIntervalMs` for the piece's whole lifetime.
+ *
+ * @param level - Current game level (1-indexed), determines the base drop speed
+ */
+export function initialGravityState(level: number): GravityState {
+  // Clamp level to valid range (mirrors applyGravity's clamping semantics)
+  const clampedLevel = Math.max(1, Math.min(level, GRAVITY_TABLE.length))
+  const baseInterval = GRAVITY_TABLE[clampedLevel - 1] ?? GRAVITY_TABLE[GRAVITY_TABLE.length - 1]!
+
+  const multiplier = 0.5 + Math.random() * 1.0 // [0.5, 1.5)
+  const pieceDropIntervalMs = Math.max(1, Math.round(baseInterval * multiplier))
+
   return {
     gravityAccum: 0,
     lockTimer: -1,
     lockResetCount: 0,
+    pieceDropIntervalMs,
   }
 }
 
@@ -99,12 +122,16 @@ export function applyGravity(
   level: number,
   softDrop = false
 ): ApplyGravityResult {
-  // Clamp level to valid range
-  const clampedLevel = Math.max(1, Math.min(level, GRAVITY_TABLE.length))
-  const baseInterval = GRAVITY_TABLE[clampedLevel - 1] ?? GRAVITY_TABLE[GRAVITY_TABLE.length - 1]!
+  // `level` is intentionally unused for interval lookup — the base interval
+  // is now pinned per-piece in gravityState.pieceDropIntervalMs (set once at
+  // spawn time by initialGravityState). The parameter is retained for
+  // call-site compatibility and potential future level-dependent behavior.
 
-  // Soft drop multiplies speed by 20x (Guideline standard)
-  const interval = softDrop ? Math.max(1, baseInterval / 20) : baseInterval
+  // Soft drop multiplies speed by 20x (Guideline standard), applied on top
+  // of the piece's pinned randomized interval.
+  const interval = softDrop
+    ? Math.max(1, gravityState.pieceDropIntervalMs / 20)
+    : gravityState.pieceDropIntervalMs
 
   let newAccum = gravityState.gravityAccum + dtMs
   let currentPiece = piece
@@ -158,6 +185,7 @@ export function applyGravity(
       gravityAccum: newAccum,
       lockTimer: newLockTimer,
       lockResetCount: newLockResetCount,
+      pieceDropIntervalMs: gravityState.pieceDropIntervalMs,
     },
     locked,
   }
